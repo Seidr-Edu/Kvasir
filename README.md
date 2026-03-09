@@ -1,0 +1,180 @@
+# Kvasir (test-port)
+
+Standalone model-driven test adaptation/evaluation tool used by experiments.
+The external service/repo name is `Kvasir`; the runner, artifact, and schema naming remain `test-port` for compatibility.
+
+## Purpose
+
+- Run baseline tests on original and generated repos in isolated copies
+- Port original tests into a generated repo copy using the local adapter prompts
+- Enforce tests-only write scope
+- Preserve behavioral mismatch evidence
+- Emit `test_port.json` and `summary.md`
+
+## Entry points
+
+- Primary runner: `./test-port-run.sh`
+- Alias: `./kvasir-run.sh`
+
+Inside the monorepo this tool lives at `tools/test_port/`.
+When synced into the standalone `Kvasir` repo, these files live at repo root.
+
+## Example
+
+```bash
+./test-port-run.sh \
+  --generated-repo /abs/path/to/generated-repo \
+  --original-repo /abs/path/to/original-repo \
+  --adapter claude \
+  --diagram /abs/path/to/diagram.puml
+```
+
+`--adapter` is required.
+
+Artifacts are written to `.data/test-port/runs/<run-id>/` by default, or to `--run-dir`.
+
+## Docker
+
+Build the standalone image from the tool root:
+
+```bash
+docker build -t kvasir:local .
+docker run --rm kvasir:local --help
+```
+
+The container includes the shell, Java, and build-tool prerequisites for local execution.
+Adapter CLIs and auth still need to be provided at runtime.
+
+## Write-scope behavior
+
+Write-scope policy remains `tests-only`, but known runtime/internal paths are ignored by default:
+
+- `./completion/proof/logs/`
+- `./.mvn_repo/`
+- `./.m2/`
+- `./.gradle/`
+- `./target/`
+- `./build/`
+
+You can add more repo-relative ignored prefixes with:
+
+- Repeatable CLI option: `--write-scope-ignore-prefix PATH`
+- Env var: `TP_WRITE_SCOPE_IGNORE_PREFIXES` (colon-separated)
+
+Example:
+
+```bash
+TP_WRITE_SCOPE_IGNORE_PREFIXES="tmp/cache:generated/reports" \
+./test-port-run.sh \
+  --generated-repo /abs/path/to/generated-repo \
+  --original-repo /abs/path/to/original-repo \
+  --write-scope-ignore-prefix completion/proof/logs
+```
+
+Ignored prefixes are reported in `test_port.json` under `write_scope.ignored_prefixes`.
+
+## Maven local repository
+
+When Maven is detected, test-port always runs Maven with:
+
+`-Dmaven.repo.local=<run-dir>/workspace/.m2/repository`
+
+This keeps dependency downloads out of copied repositories while reusing dependencies inside a single test-port run.
+
+## Gradle cache and temp directories
+
+When Gradle is detected, test-port runs with:
+
+- `GRADLE_USER_HOME=<run-dir>/workspace/.gradle`
+- `TMPDIR=<run-dir>/workspace/tmp`
+
+This keeps Gradle cache/temp writes hermetic to the run workspace.
+
+## Module/subdir selection
+
+- `--original-subdir` selects the original module root for baseline snapshotting.
+- `--generated-subdir` selects the generated module root for generated baseline and ported execution.
+- If `--generated-subdir` is omitted, test-port attempts auto-detection from copied original tests and build markers.
+
+## Retention policy
+
+Test-port maximizes retained original tests across iterations:
+
+- It does not stop at the first passing adaptation if original tests were removed.
+- It keeps iterating (up to `--max-iter`) and selects the best valid iteration with the highest retained original-test count.
+- It stops early only when full retention is reached.
+
+Retained/removed metrics are reported in `test_port.json` under `suite_shape`:
+
+- `retained_original_test_file_count`
+- `removed_original_test_file_count`
+- `retention_ratio` (`retained_original/original_snapshot`)
+
+## Removed-test manifest contract
+
+If an original test file is removed, it must be documented in:
+
+`./completion/proof/logs/test-port-removed-tests.tsv`
+
+Format (tab-separated):
+
+`<repo-relative-test-path>\t<category>\t<reason>`
+
+Allowed categories:
+
+- `unportable`
+- `missing-target-feature`
+
+Undocumented removed original tests fail the iteration with:
+
+- `reason=insufficient-test-evidence`
+- `failure_class=undocumented-test-removal`
+
+Detailed entries are reported in `test_port.json` under `removed_original_tests`.
+
+## Runner preflight and no-test-signal
+
+Before running adaptation/baselines, test-port captures `runner_preflight` in `test_port.json`:
+
+- `detected_runner`
+- `supported`
+- `missing_capabilities[]`
+- `module_root`
+- `frameworks_detected[]`
+
+Unsupported/missing capabilities produce:
+
+- `status=skipped`
+- `reason=unsupported-test-runner`
+- `status_detail=unsupported_runner`
+
+If tests exit `0` but `tests_executed == 0`, test-port does not emit a pass verdict:
+
+- `status=skipped`
+- `reason=no-test-signal`
+- `status_detail=no_test_signal`
+- `behavioral_verdict=no_test_signal`
+
+## Output schema v2 highlights
+
+`outputs/test_port.json` is now schema `version: 2` with additive compatibility fields:
+
+- `status_detail`
+- `failure_class_legacy`
+- `runner_preflight`
+- `failure_diagnostics`
+- per-suite `execution_summary` for baseline/generated/ported suites
+- suite rewrite metrics: `retained_modified_count`, `retained_unchanged_count`, `assertion_line_change_count`
+
+`no_difference_detected` is only emitted when baseline original is comparable/pass, ported tests pass, and non-zero tests executed.
+
+## Runner support roadmap
+
+Current execution support:
+
+- Maven Surefire/Failsafe (JUnit4/JUnit5/TestNG via Maven runner)
+- Gradle `test` (wrapper or system Gradle)
+
+Current preflight-only / planned:
+
+- Node/Jest and non-Java runners: detected as unsupported today, surfaced via `runner_preflight.missing_capabilities`.
