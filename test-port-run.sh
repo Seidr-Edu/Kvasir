@@ -121,8 +121,6 @@ tp_init_result_state() {
   TP_BEST_VALID_PORTED_JUNIT_REPORTS_FOUND=0
   TP_RETENTION_POLICY_MODE="maximize-retained-original-tests"
   TP_RETENTION_DOCUMENTED_REMOVALS_REQUIRED=true
-
-  mkdir -p "$TP_RUN_DIR" "$TP_LOG_DIR" "$TP_OUTPUT_DIR"
 }
 
 tp_stage_best_valid_candidate() {
@@ -270,22 +268,42 @@ tp_execute() {
   : > "$TP_ADAPTER_STDERR_LOG"
   : > "$TP_ADAPTER_LAST_MESSAGE"
 
-  [[ -d "$TP_GENERATED_REPO" ]] || { TP_STATUS="skipped"; TP_REASON="missing-generated-repo"; return 0; }
+  [[ -d "$TP_ORIGINAL_REPO" ]] || {
+    TP_STATUS="skipped"
+    TP_REASON="missing-original-repo"
+    TP_STATUS_DETAIL="missing_input"
+    return 0
+  }
+  [[ -d "$TP_GENERATED_REPO" ]] || {
+    TP_STATUS="skipped"
+    TP_REASON="missing-generated-repo"
+    TP_STATUS_DETAIL="missing_input"
+    return 0
+  }
 
   if ! tp_adapter_check_prereqs "$TP_ADAPTER"; then
     TP_ADAPTER_PREREQS_OK=false
     TP_STATUS="skipped"
     TP_REASON="adapter-prereqs-failed"
+    TP_STATUS_DETAIL="adapter_prereqs_failed"
     return 0
   fi
 
   if ! command -v rsync >/dev/null 2>&1; then
     TP_STATUS="skipped"
     TP_REASON="missing-rsync"
+    TP_STATUS_DETAIL="missing_runtime_dependency"
     return 0
   fi
 
-  tp_prepare_workspace_copies
+  if ! tp_prepare_workspace_copies; then
+    TP_STATUS="failed"
+    TP_REASON="workspace-prepare-failed"
+    TP_STATUS_DETAIL="workspace_prepare_failed"
+    TP_FAILURE_CLASS="workspace-prepare-failed"
+    TP_FAILURE_CLASS_LEGACY="unknown"
+    return 0
+  fi
   TP_WORKSPACE_PREPARED=true
 
   set +e
@@ -492,6 +510,8 @@ main() {
   tp_validate_and_finalize_args
   tp_adapter_validate_supported "$TP_ADAPTER"
   tp_init_result_state
+  mkdir -p "$TP_LOG_DIR" "$TP_OUTPUT_DIR" "$TP_TMP_DIR"
+  export TMPDIR="$TP_TMP_DIR"
 
   # Codex adapter requires a diagram path to derive a readable context dir. When no
   # diagram is supplied, use a synthetic path under the generated repo (dirname exists).
@@ -525,4 +545,6 @@ main() {
   return 0
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

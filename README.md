@@ -13,8 +13,9 @@ The external service/repo name is `Kvasir`; the runner, artifact, and schema nam
 
 ## Entry points
 
-- Primary runner: `./test-port-run.sh`
-- Alias: `./kvasir-run.sh`
+- Human CLI: `./test-port-run.sh`
+- Human CLI alias: `./kvasir-run.sh`
+- Container/service entrypoint: `./kvasir-service.sh`
 
 Inside the monorepo this tool lives at `tools/test_port/`.
 When synced into the standalone `Kvasir` repo, these files live at repo root.
@@ -33,6 +34,65 @@ When synced into the standalone `Kvasir` repo, these files live at repo root.
 
 Artifacts are written to `.data/test-port/runs/<run-id>/` by default, or to `--run-dir`.
 
+## Container service contract
+
+Kvasir is packaged as a service container, not just a shell script inside an image.
+
+Mount contract:
+
+- Read-only: `/input/original-repo`
+- Read-only: `/input/generated-repo`
+- Read-only optional: `/input/model`
+- Writable: `/run`
+
+Required outputs:
+
+- `/run/outputs/test_port.json`
+- `/run/outputs/summary.md`
+
+Debug/analysis artifacts:
+
+- `/run/logs/`
+- `/run/workspace/`
+
+Input repos are immutable from the service point of view. Kvasir copies them into `/run/workspace/` and mutates only those copies.
+
+## Service configuration
+
+`kvasir-service.sh` accepts env vars and an optional Kvasir-specific manifest:
+
+- `KVASIR_MANIFEST`
+- `KVASIR_ORIGINAL_REPO` (default `/input/original-repo`)
+- `KVASIR_GENERATED_REPO` (default `/input/generated-repo`)
+- `KVASIR_DIAGRAM` (default `/input/model/diagram.puml` when present)
+- `KVASIR_RUN_DIR` (default `/run`)
+- `KVASIR_ADAPTER`
+- `KVASIR_ORIGINAL_SUBDIR`
+- `KVASIR_GENERATED_SUBDIR`
+- `KVASIR_MAX_ITER`
+- `KVASIR_WRITE_SCOPE_IGNORE_PREFIXES`
+
+The service entrypoint does not expose `--strict`; service verdicts belong in `test_port.json`.
+
+Configuration precedence is:
+
+1. Built-in defaults
+2. Manifest values
+3. Env var overrides
+
+Manifest v1 fields:
+
+- `version` (`1` required)
+- `run_id`
+- `adapter`
+- `original_subdir`
+- `generated_subdir`
+- `diagram_relpath`
+- `max_iter`
+- `write_scope_ignore_prefixes[]`
+
+The manifest is intentionally service-specific so the orchestrator can mount only the configuration Kvasir is meant to consume.
+
 ## Docker
 
 Build the standalone image from the tool root:
@@ -42,8 +102,34 @@ docker build -t kvasir:local .
 docker run --rm kvasir:local --help
 ```
 
-The container includes the shell, Java, and build-tool prerequisites for local execution.
-Adapter CLIs and auth still need to be provided at runtime.
+The image runs `kvasir-service.sh` as a non-root `kvasir` user (`uid=10001`, `gid=10001`).
+The `/run` mount must therefore be writable by that user or otherwise permit writes.
+
+Example container execution:
+
+```bash
+docker run --rm \
+  -e PATH="/opt/provider/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+  -e KVASIR_ADAPTER=codex \
+  -v /abs/path/to/original-repo:/input/original-repo:ro \
+  -v /abs/path/to/generated-repo:/input/generated-repo:ro \
+  -v /abs/path/to/model:/input/model:ro \
+  -v /abs/path/to/run:/run \
+  -v /abs/path/to/provider/bin:/opt/provider/bin:ro \
+  kvasir:local
+```
+
+The image includes the shell, Java, and build-tool prerequisites for local execution.
+Provider CLIs are not baked into the image. The orchestrator is expected to mount the selected shared provider runtime/auth into Kvasir and Andvari and ensure the chosen adapter binary is on `PATH`.
+
+## Exit semantics
+
+For container/service usage:
+
+- Exit `0`: a machine-readable result was emitted and the evaluation completed, regardless of verdict
+- Exit `1`: contract/setup/prereq/reporting/internal failure prevented a normal evaluation result
+
+Domain verdicts live in `test_port.json`; orchestration should read the report instead of inferring meaning from process exit codes.
 
 ## Write-scope behavior
 

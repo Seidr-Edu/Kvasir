@@ -11,6 +11,8 @@ scripts=(
   test_verdict.sh
   test_report.sh
   test_e2e_hermetic.sh
+  test_service.sh
+  test_container_integration.sh
 )
 
 for script in "${scripts[@]}"; do
