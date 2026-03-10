@@ -266,6 +266,34 @@ case_non_writable_run_dir_still_emits_report() {
   assert_report_fields "$json_path" "skipped" "run-dir-not-writable" "run_dir_not_writable" "skipped"
 }
 
+case_non_writable_logs_dir_still_emits_report() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+
+  mkdir -p "${run_dir}/outputs" "${run_dir}/logs"
+  chmod 700 "${run_dir}/outputs"
+  chmod 500 "${run_dir}/logs"
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex")"
+
+  chmod 700 "${run_dir}/logs"
+
+  tpt_assert_eq "1" "$rc" "non-writable logs dir must exit 1"
+  tpt_assert_file_exists "$json_path" "non-writable logs dir must still emit json report"
+  tpt_assert_file_exists "${run_dir}/outputs/summary.md" "non-writable logs dir must still emit summary"
+  assert_report_fields "$json_path" "skipped" "run-dir-not-writable" "run_dir_not_writable" "skipped"
+}
+
 tpt_run_case "env-only service startup passes" case_env_only_startup_passes
 tpt_run_case "manifest-driven service startup passes" case_manifest_driven_startup_passes
 tpt_run_case "env overrides manifest values" case_env_overrides_manifest_values
@@ -273,5 +301,6 @@ tpt_run_case "invalid manifest still emits report" case_invalid_manifest_still_e
 tpt_run_case "missing adapter still emits report" case_missing_adapter_still_emits_report
 tpt_run_case "missing original repo still emits report" case_missing_original_repo_still_emits_report
 tpt_run_case "non-writable run dir still emits report" case_non_writable_run_dir_still_emits_report
+tpt_run_case "non-writable logs dir still emits report" case_non_writable_logs_dir_still_emits_report
 
 tpt_finish_suite

@@ -144,11 +144,15 @@ kvasir_service_prepare_output_dir() {
 }
 
 kvasir_service_prepare_runtime_dirs() {
+  local dir
   local probe
   mkdir -p "$TP_LOG_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR" >/dev/null 2>&1 || return 1
-  probe="${TP_WORKSPACE_DIR}/.kvasir-workspace-write-test.$$"
-  : > "$probe" >/dev/null 2>&1 || return 1
-  rm -f "$probe"
+
+  for dir in "$TP_LOG_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR"; do
+    probe="${dir}/.kvasir-write-test.$$"
+    : > "$probe" >/dev/null 2>&1 || return 1
+    rm -f "$probe"
+  done
 }
 
 kvasir_service_apply_failure() {
