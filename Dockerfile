@@ -15,11 +15,20 @@ RUN apt-get update \
     ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
+RUN groupadd --gid 10001 kvasir \
+  && useradd --uid 10001 --gid 10001 --create-home --shell /usr/sbin/nologin kvasir \
+  && mkdir -p /run \
+  && chown -R kvasir:kvasir /run
+
 WORKDIR /app
 
 COPY . .
 
-RUN chmod +x ./test-port-run.sh ./kvasir-run.sh ./tests/run.sh
+RUN chmod +x ./test-port-run.sh ./kvasir-run.sh ./kvasir-service.sh ./tests/run.sh \
+  && chown -R kvasir:kvasir /app
 
-ENTRYPOINT ["./test-port-run.sh"]
-CMD ["--help"]
+USER kvasir
+
+ENV HOME=/home/kvasir
+
+ENTRYPOINT ["./kvasir-service.sh"]

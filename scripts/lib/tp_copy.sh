@@ -31,14 +31,14 @@ tp_fix_maven_offline_config() {
 tp_prepare_workspace_copies() {
   mkdir -p "$TP_WORKSPACE_DIR" "$TP_LOG_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_OUTPUT_DIR"
 
-  tp_copy_dir "$TP_ORIGINAL_EFFECTIVE_PATH" "$TP_ORIGINAL_BASELINE_REPO"
-  tp_copy_dir "$TP_GENERATED_REPO" "$TP_GENERATED_BASELINE_REPO"
-  tp_copy_dir "$TP_GENERATED_REPO" "$TP_PORTED_REPO"
+  tp_copy_dir "$TP_ORIGINAL_EFFECTIVE_PATH" "$TP_ORIGINAL_BASELINE_REPO" || return 1
+  tp_copy_dir "$TP_GENERATED_REPO" "$TP_GENERATED_BASELINE_REPO" || return 1
+  tp_copy_dir "$TP_GENERATED_REPO" "$TP_PORTED_REPO" || return 1
 
   # Remove bare Maven offline flags from workspace copies if there is no
   # local Maven cache — such configs make all Maven builds fail immediately.
-  tp_fix_maven_offline_config "$TP_GENERATED_BASELINE_REPO"
-  tp_fix_maven_offline_config "$TP_PORTED_REPO"
+  tp_fix_maven_offline_config "$TP_GENERATED_BASELINE_REPO" || return 1
+  tp_fix_maven_offline_config "$TP_PORTED_REPO" || return 1
 
   TP_GENERATED_REPO_BEFORE_HASH="$(tp_tree_fingerprint "$TP_GENERATED_REPO")"
   printf '%s\n' "$TP_GENERATED_REPO_BEFORE_HASH" > "$TP_GENERATED_BEFORE_HASH_PATH"
@@ -70,5 +70,5 @@ tp_seed_ported_repo_with_original_tests() {
     \( -path '*/src/test' -o -path '*/test' -o -path '*/tests' -o -path '*/src/*Test*' \) \
     -prune -exec rm -rf {} + 2>/dev/null || true
 
-  rsync -a "$TP_ORIGINAL_TESTS_SNAPSHOT/" "$target_root/" >/dev/null 2>&1
+  rsync -a "$TP_ORIGINAL_TESTS_SNAPSHOT/" "$target_root/" >/dev/null 2>&1 || return 1
 }
