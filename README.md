@@ -61,7 +61,7 @@ Input repos are immutable from the service point of view. Kvasir copies them int
 
 `kvasir-service.sh` accepts env vars and an optional Kvasir-specific manifest:
 
-- `KVASIR_MANIFEST`
+- `KVASIR_MANIFEST` (optional override; default manifest path is `/run/config/manifest.yaml` when present)
 - `KVASIR_ORIGINAL_REPO` (default `/input/original-repo`)
 - `KVASIR_GENERATED_REPO` (default `/input/generated-repo`)
 - `KVASIR_DIAGRAM` (default `/input/model/diagram.puml` when present)
@@ -109,18 +109,18 @@ Example container execution:
 
 ```bash
 docker run --rm \
-  -e PATH="/opt/provider/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   -e KVASIR_ADAPTER=codex \
   -v /abs/path/to/original-repo:/input/original-repo:ro \
   -v /abs/path/to/generated-repo:/input/generated-repo:ro \
   -v /abs/path/to/model:/input/model:ro \
   -v /abs/path/to/run:/run \
   -v /abs/path/to/provider/bin:/opt/provider/bin:ro \
+  -v /abs/path/to/provider/codex-home:/opt/provider-seed/codex-home:ro \
   kvasir:local
 ```
 
 The image includes the shell, Java, and build-tool prerequisites for local execution.
-Provider CLIs are not baked into the image. The orchestrator is expected to mount the selected shared provider runtime/auth into Kvasir and Andvari and ensure the chosen adapter binary is on `PATH`.
+Provider CLIs are not baked into the image. The caller should mount the selected provider binary directory at `/opt/provider/bin` and an authenticated Codex home at `/opt/provider-seed/codex-home`, both read-only. The service copies that auth seed into `/run/provider-state/codex-home` and sets `PATH` and `CODEX_HOME` internally before running adapter prereq checks.
 
 ## Exit semantics
 

@@ -12,6 +12,7 @@ RUN apt-get update \
     maven \
     openjdk-21-jdk-headless \
     python3 \
+    rsync \
     ripgrep \
   && rm -rf /var/lib/apt/lists/*
 
