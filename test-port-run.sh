@@ -3,7 +3,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TOOLS_DIR="$SCRIPT_DIR"
-MONOREPO_ROOT_CANDIDATE="$(cd "${TOOLS_DIR}/../.." 2>/dev/null && pwd -P || true)"
+if cd "${TOOLS_DIR}/../.." 2>/dev/null; then
+  MONOREPO_ROOT_CANDIDATE="$(pwd -P)"
+else
+  MONOREPO_ROOT_CANDIDATE=""
+fi
 if [[ -n "$MONOREPO_ROOT_CANDIDATE" ]] && [[ -d "${MONOREPO_ROOT_CANDIDATE}/tools/test_port" ]] && [[ "$(cd "${MONOREPO_ROOT_CANDIDATE}/tools/test_port" && pwd -P)" == "$TOOLS_DIR" ]]; then
   REPO_ROOT="$MONOREPO_ROOT_CANDIDATE"
 else

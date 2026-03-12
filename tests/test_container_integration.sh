@@ -11,7 +11,7 @@ source "${SCRIPT_DIR}/lib/testlib.sh"
 source "${SCRIPT_DIR}/lib/service_testlib.sh"
 
 case_container_contract_emits_report() {
-  local tmp original_repo generated_repo run_dir image_tag build_log run_log provider_mount path_env rc
+  local tmp original_repo generated_repo provider_bin provider_seed run_dir image_tag build_log run_log rc
   tmp="$(tpt_mktemp_dir)"
   build_log="${tmp}/docker-build.log"
   run_log="${tmp}/docker-run.log"
@@ -34,11 +34,12 @@ case_container_contract_emits_report() {
   export TPT_CODEX_CALL_COUNT_FILE="/run/logs/codex-call-count.txt"
   export TPT_CLAUDE_CALL_COUNT_FILE="/run/logs/claude-call-count.txt"
   IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  IFS=$'\t' read -r provider_bin provider_seed < <(prepare_fake_provider_mounts "$tmp")
 
   run_dir="${tmp}/run"
   mkdir -p "$run_dir"
   chmod 0777 "$run_dir"
-  chmod -R a+rX "$original_repo" "$generated_repo" "${tmp}/bin"
+  chmod -R a+rX "$original_repo" "$generated_repo" "$provider_bin" "$provider_seed"
 
   image_tag="kvasir-test:$(date +%s)"
   if ! docker build -t "$image_tag" "$TOOL_ROOT" >"$build_log" 2>&1; then
@@ -47,21 +48,18 @@ case_container_contract_emits_report() {
   fi
   trap 'docker image rm -f "$image_tag" >/dev/null 2>&1 || true' RETURN
 
-  provider_mount="/opt/provider/bin"
-  path_env="${provider_mount}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-
   set +e
   docker run --rm \
-    -e PATH="$path_env" \
-    -e CODEX_HOME=/run/codex-home \
     -e KVASIR_ADAPTER=codex \
     -e TPT_ADAPTER_SCENARIO="$TPT_ADAPTER_SCENARIO" \
     -e TPT_CODEX_CALL_COUNT_FILE="$TPT_CODEX_CALL_COUNT_FILE" \
     -e TPT_CLAUDE_CALL_COUNT_FILE="$TPT_CLAUDE_CALL_COUNT_FILE" \
+    -e TPT_EXPECT_CODEX_HOME_PREFIX="/run/provider-state/codex-home" \
     -v "${original_repo}:/input/original-repo:ro" \
     -v "${generated_repo}:/input/generated-repo:ro" \
     -v "${run_dir}:/run" \
-    -v "${tmp}/bin:${provider_mount}:ro" \
+    -v "${provider_bin}:/opt/provider/bin:ro" \
+    -v "${provider_seed}:/opt/provider-seed/codex-home:ro" \
     "$image_tag" >"$run_log" 2>&1
   rc=$?
   set -e
@@ -72,6 +70,7 @@ case_container_contract_emits_report() {
   fi
 
   tpt_assert_file_exists "${run_dir}/outputs/test_port.json" "container contract must emit test_port.json"
+  tpt_assert_file_exists "${run_dir}/provider-state/codex-home/sessions/auth-state.json" "container contract should copy provider seed into runtime CODEX_HOME"
 }
 
 tpt_run_case "container contract emits json report" case_container_contract_emits_report

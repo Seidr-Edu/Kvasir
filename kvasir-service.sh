@@ -2,6 +2,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+KVASIR_SERVICE_PROVIDER_BIN="${KVASIR_SERVICE_PROVIDER_BIN:-/opt/provider/bin}"
+KVASIR_SERVICE_PROVIDER_SEED="${KVASIR_SERVICE_PROVIDER_SEED:-/opt/provider-seed/codex-home}"
 
 # shellcheck source=/dev/null
 source "${SCRIPT_DIR}/test-port-run.sh"
@@ -19,7 +21,8 @@ Container contract:
     /run
 
 Environment:
-  KVASIR_MANIFEST                         Optional Kvasir-specific JSON manifest path
+  KVASIR_MANIFEST                         Optional Kvasir-specific YAML manifest path
+                                          (default: /run/config/manifest.yaml when present)
   KVASIR_ORIGINAL_REPO                   Default: /input/original-repo
   KVASIR_GENERATED_REPO                  Default: /input/generated-repo
   KVASIR_DIAGRAM                         Default: /input/model/diagram.puml when present
@@ -29,6 +32,11 @@ Environment:
   KVASIR_GENERATED_SUBDIR                Optional
   KVASIR_MAX_ITER                        Optional non-negative integer
   KVASIR_WRITE_SCOPE_IGNORE_PREFIXES     Optional colon-separated repo-relative prefixes
+
+Provider mounts (for adapter=codex):
+  Read-only: /opt/provider/bin
+  Read-only: /opt/provider-seed/codex-home
+  Writable:  /run/provider-state/codex-home (created by the service)
 
 Manifest v1 fields:
   version (required, must be 1)
@@ -71,53 +79,154 @@ kvasir_service_normalize_rel_path() {
 kvasir_service_load_manifest() {
   local manifest_path="$1"
   python3 - <<'PY' "$manifest_path"
-import json
+import re
 import shlex
 import sys
 
 path = sys.argv[1]
+allowed = {
+    "version",
+    "run_id",
+    "adapter",
+    "original_subdir",
+    "generated_subdir",
+    "diagram_relpath",
+    "max_iter",
+    "write_scope_ignore_prefixes",
+}
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+def strip_inline_comment(value):
+    return re.split(r"\s+#", value, maxsplit=1)[0].rstrip()
+
+
+def parse_scalar(raw_value, lineno):
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    if value.startswith(("{", "[", "|", ">")) or value == "-":
+        fail(f"invalid manifest YAML: unsupported value syntax on line {lineno}")
+
+    if value[0] == '"':
+        match = re.match(r'^"((?:[^"\\]|\\.)*)"(?:\s+#.*)?$', value)
+        if not match:
+            fail(f"invalid manifest YAML: malformed double-quoted string on line {lineno}")
+        return bytes(match.group(1), "utf-8").decode("unicode_escape")
+
+    if value[0] == "'":
+        match = re.match(r"^'((?:[^']|'')*)'(?:\s+#.*)?$", value)
+        if not match:
+            fail(f"invalid manifest YAML: malformed single-quoted string on line {lineno}")
+        return match.group(1).replace("''", "'")
+
+    value = strip_inline_comment(value)
+    if value.startswith(("{", "[", "|", ">", "- ")):
+        fail(f"invalid manifest YAML: unsupported value syntax on line {lineno}")
+
+    if value in ("null", "Null", "NULL", "~"):
+        return None
+
+    if re.fullmatch(r"-?\d+", value):
+        return int(value)
+
+    return value
 
 try:
     with open(path, "r", encoding="utf-8") as f:
-        obj = json.load(f)
+        raw_lines = f.read().splitlines()
+except FileNotFoundError:
+    fail(f"missing manifest: {path}")
 except Exception as exc:
-    print(f"invalid manifest JSON: {exc}", file=sys.stderr)
-    raise SystemExit(1)
+    fail(f"invalid manifest YAML: {exc}")
 
-if not isinstance(obj, dict):
-    print("manifest must be a JSON object", file=sys.stderr)
-    raise SystemExit(1)
+line_re = re.compile(r"^([A-Za-z0-9_]+)\s*:\s*(.*?)\s*$")
+item_re = re.compile(r"^(\s*)-\s*(.*?)\s*$")
 
-version = obj.get("version")
+data = {}
+list_key = None
+list_indent = -1
+
+for lineno, raw_line in enumerate(raw_lines, start=1):
+    stripped = raw_line.strip()
+
+    if list_key is not None:
+        if not stripped or stripped.startswith("#"):
+            continue
+        item_match = item_re.match(raw_line)
+        if item_match and len(item_match.group(1)) > list_indent:
+            item = parse_scalar(item_match.group(2), lineno)
+            if item is None or not isinstance(item, str):
+                fail(f"manifest field {list_key!r} must contain only strings")
+            data[list_key].append(item)
+            continue
+        list_key = None
+        list_indent = -1
+
+    if not stripped or stripped.startswith("#"):
+        continue
+
+    if raw_line[:1].isspace():
+        fail(f"invalid manifest YAML: unsupported indentation on line {lineno}")
+
+    match = line_re.match(raw_line)
+    if not match:
+        fail(f"invalid manifest YAML: unsupported syntax on line {lineno}")
+
+    key, raw_value = match.groups()
+    if key in data:
+        fail(f"duplicate manifest key: {key}")
+    if key not in allowed:
+        fail(f"unknown manifest key: {key}")
+
+    if key == "write_scope_ignore_prefixes":
+        value = strip_inline_comment(raw_value.strip())
+        if not value:
+            data[key] = []
+            list_key = key
+            list_indent = 0
+            continue
+        if re.fullmatch(r"\[\s*\]", value):
+            data[key] = []
+            continue
+        fail("manifest field 'write_scope_ignore_prefixes' must be an array of strings")
+
+    data[key] = parse_scalar(raw_value, lineno)
+
+version = data.get("version")
 if version != 1:
-    print(f"unsupported manifest version: {version!r}", file=sys.stderr)
-    raise SystemExit(1)
+    fail(f"unsupported manifest version: {version!r}")
+
 
 def opt_str(name):
-    value = obj.get(name)
+    value = data.get(name)
     if value is None:
         return ""
     if not isinstance(value, str):
-        print(f"manifest field {name!r} must be a string", file=sys.stderr)
-        raise SystemExit(1)
+        fail(f"manifest field {name!r} must be a string")
     return value
 
+
 def opt_int(name):
-    value = obj.get(name)
+    value = data.get(name)
     if value is None:
         return ""
     if not isinstance(value, int):
-        print(f"manifest field {name!r} must be an integer", file=sys.stderr)
-        raise SystemExit(1)
+        fail(f"manifest field {name!r} must be an integer")
     return str(value)
 
+
 def opt_str_list(name):
-    value = obj.get(name)
+    value = data.get(name)
     if value is None:
         return ""
     if not isinstance(value, list) or any(not isinstance(item, str) for item in value):
-        print(f"manifest field {name!r} must be an array of strings", file=sys.stderr)
-        raise SystemExit(1)
+        fail(f"manifest field {name!r} must be an array of strings")
     return ":".join(value)
 
 assignments = {
@@ -153,6 +262,28 @@ kvasir_service_prepare_runtime_dirs() {
     : > "$probe" >/dev/null 2>&1 || return 1
     rm -f "$probe"
   done
+}
+
+kvasir_service_bootstrap_provider() {
+  local adapter="$1"
+
+  case "$adapter" in
+    codex)
+      local runtime_dir="${TP_RUN_DIR}/provider-state/codex-home"
+      if [[ -d "$KVASIR_SERVICE_PROVIDER_BIN" || -d "$KVASIR_SERVICE_PROVIDER_SEED" ]]; then
+        mkdir -p "${runtime_dir}/sessions" >/dev/null 2>&1 || return 1
+        if [[ -d "$KVASIR_SERVICE_PROVIDER_SEED" ]]; then
+          # Avoid preserving source ownership so read-only host auth mounts still
+          # copy into the writable runtime home under the container user.
+          cp -R "${KVASIR_SERVICE_PROVIDER_SEED}/." "${runtime_dir}/" >/dev/null 2>&1 || return 1
+        fi
+        export CODEX_HOME="$runtime_dir"
+      fi
+      if [[ -d "$KVASIR_SERVICE_PROVIDER_BIN" ]]; then
+        export PATH="${KVASIR_SERVICE_PROVIDER_BIN}:${PATH}"
+      fi
+      ;;
+  esac
 }
 
 kvasir_service_apply_failure() {
@@ -242,6 +373,13 @@ kvasir_service_main() {
   if ! kvasir_service_prepare_output_dir; then
     tp_err "service outputs dir is not writable: ${TP_OUTPUT_DIR}"
     return 1
+  fi
+
+  if [[ -z "$manifest_path" ]]; then
+    local default_manifest_path="${TP_RUN_DIR}/config/manifest.yaml"
+    if [[ -f "$default_manifest_path" ]]; then
+      manifest_path="$default_manifest_path"
+    fi
   fi
 
   if [[ -f "/input/model/diagram.puml" ]]; then
@@ -442,6 +580,15 @@ kvasir_service_main() {
     fi
     return 1
   fi
+
+  if ! kvasir_service_bootstrap_provider "$TP_ADAPTER"; then
+    kvasir_service_apply_failure "adapter-prereqs-failed" "provider_bootstrap_failed"
+    if ! kvasir_service_write_reports_or_fail; then
+      return 1
+    fi
+    return 1
+  fi
+
   export TMPDIR="$TP_TMP_DIR"
 
   TP_ADAPTER_INPUT_DIAGRAM_PATH="${TP_DIAGRAM_PATH:-${TP_GENERATED_REPO}/.test-port-no-diagram.puml}"

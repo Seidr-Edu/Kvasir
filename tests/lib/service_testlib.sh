@@ -55,6 +55,30 @@ ADAPTER
 #!/usr/bin/env bash
 set -euo pipefail
 
+record_codex_home() {
+  local capture_file="${TPT_CODEX_HOME_CAPTURE_FILE:-}"
+  if [[ -n "$capture_file" ]]; then
+    printf '%s\n' "${CODEX_HOME:-}" > "$capture_file"
+  fi
+}
+
+require_authenticated_codex_home() {
+  local codex_home="${CODEX_HOME:-}"
+  local expected_prefix="${TPT_EXPECT_CODEX_HOME_PREFIX:-}"
+
+  record_codex_home
+
+  if [[ -n "$expected_prefix" && "$codex_home" != "$expected_prefix"* ]]; then
+    printf 'unexpected CODEX_HOME: %s\n' "$codex_home" >&2
+    exit 1
+  fi
+
+  if [[ ! -f "${codex_home}/sessions/auth-state.json" ]]; then
+    printf 'codex CLI is not authenticated.\n' >&2
+    exit 1
+  fi
+}
+
 increment_call_counter() {
   local counter_file="${TPT_CODEX_CALL_COUNT_FILE:-}"
   if [[ -z "$counter_file" ]]; then
@@ -74,10 +98,12 @@ subcommand="${1:-}"
 case "$subcommand" in
   login)
     if [[ "${2:-}" == "status" ]]; then
+      require_authenticated_codex_home
       exit 0
     fi
     ;;
   exec)
+    require_authenticated_codex_home
     shift
     output_last=""
     while [[ $# -gt 0 ]]; do
@@ -203,6 +229,25 @@ MVN
   export PATH="${fake_bin}:$PATH"
   export CODEX_HOME="${root}/codex-home"
   mkdir -p "${CODEX_HOME}/sessions"
+  printf 'authenticated\n' > "${CODEX_HOME}/sessions/auth-state.json"
+}
+
+write_fake_codex_auth_seed() {
+  local seed_dir="$1"
+  mkdir -p "${seed_dir}/sessions"
+  printf 'authenticated\n' > "${seed_dir}/sessions/auth-state.json"
+}
+
+prepare_fake_provider_mounts() {
+  local root="$1"
+  local provider_bin="${root}/provider-bin"
+  local provider_seed="${root}/provider-seed"
+
+  mkdir -p "$provider_bin"
+  cp -R "${root}/bin/." "${provider_bin}/"
+  write_fake_codex_auth_seed "$provider_seed"
+
+  printf '%s\t%s\n' "$provider_bin" "$provider_seed"
 }
 
 prepare_fixture_repos() {
