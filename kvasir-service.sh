@@ -273,7 +273,9 @@ kvasir_service_bootstrap_provider() {
       if [[ -d "$KVASIR_SERVICE_PROVIDER_BIN" || -d "$KVASIR_SERVICE_PROVIDER_SEED" ]]; then
         mkdir -p "${runtime_dir}/sessions" >/dev/null 2>&1 || return 1
         if [[ -d "$KVASIR_SERVICE_PROVIDER_SEED" ]]; then
-          cp -a "${KVASIR_SERVICE_PROVIDER_SEED}/." "${runtime_dir}/" >/dev/null 2>&1 || return 1
+          # Avoid preserving source ownership so read-only host auth mounts still
+          # copy into the writable runtime home under the container user.
+          cp -R "${KVASIR_SERVICE_PROVIDER_SEED}/." "${runtime_dir}/" >/dev/null 2>&1 || return 1
         fi
         export CODEX_HOME="$runtime_dir"
       fi
