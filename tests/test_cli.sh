@@ -86,6 +86,7 @@ case_rejects_parent_traversal_prefix() {
   tmp="$(tpt_mktemp_dir)"
   create_minimal_repos "$tmp"
 
+  # shellcheck disable=SC2030,SC2031
   if (
     TP_WRITE_SCOPE_IGNORE_PREFIXES="../outside"
     tp_parse_args \
@@ -105,8 +106,9 @@ case_rejects_empty_env_prefix_entries() {
   tmp="$(tpt_mktemp_dir)"
   create_minimal_repos "$tmp"
 
+  # shellcheck disable=SC2030,SC2031
   if (
-    TP_WRITE_SCOPE_IGNORE_PREFIXES="valid::also-valid"
+    export TP_WRITE_SCOPE_IGNORE_PREFIXES="valid::also-valid"
     tp_parse_args \
       --generated-repo "${tmp}/generated" \
       --original-repo "${tmp}/original" \

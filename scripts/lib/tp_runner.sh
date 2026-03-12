@@ -3,6 +3,15 @@
 
 set -euo pipefail
 
+tp_restore_errexit() {
+  local had_errexit="${1:-false}"
+  if [[ "$had_errexit" == "true" ]]; then
+    set -e
+  else
+    set +e
+  fi
+}
+
 tp_detect_test_runner() {
   local repo="$1"
   if [[ -f "$repo/pom.xml" ]]; then
@@ -259,12 +268,12 @@ tp_run_tests() {
     gradle-wrapper|gradle) tp_run_gradle_test "$repo" "$log_file" "$runner" ;;
     *)
       echo "unsupported test runner" >"$log_file"
-      $had_errexit && set -e || set +e
+      tp_restore_errexit "$had_errexit"
       return 2
       ;;
   esac
   local rc=$?
-  $had_errexit && set -e || set +e
+  tp_restore_errexit "$had_errexit"
   return "$rc"
 }
 
@@ -596,7 +605,7 @@ tp_run_baseline_tests() {
       if [[ "$unit_rc" -eq 0 ]]; then
         cp "$unit_log" "$log_file"
         TP_BASELINE_LAST_STATUS="pass"
-        $had_errexit && set -e || set +e
+        tp_restore_errexit "$had_errexit"
         return 0
       fi
 
@@ -616,7 +625,7 @@ tp_run_baseline_tests() {
         TP_BASELINE_LAST_FAILURE_CLASS=""
         TP_BASELINE_LAST_FAILURE_CLASS_LEGACY=""
         TP_BASELINE_LAST_FAILURE_TYPE=""
-        $had_errexit && set -e || set +e
+        tp_restore_errexit "$had_errexit"
         return 0
       fi
 
@@ -631,7 +640,7 @@ tp_run_baseline_tests() {
       TP_BASELINE_LAST_FAILURE_FIRST_LINE="$TP_LAST_FAILURE_FIRST_LINE"
       TP_BASELINE_LAST_FAILURE_TYPE="$(tp_infer_baseline_failure_type "$unit_class" "$full_class" "$unit_rc" "$full_rc")"
       TP_BASELINE_LAST_STATUS="fail-with-integration-skip"
-      $had_errexit && set -e || set +e
+      tp_restore_errexit "$had_errexit"
       return "$full_rc"
       ;;
     gradle-wrapper|gradle)
@@ -641,7 +650,7 @@ tp_run_baseline_tests() {
     *)
       echo "unsupported test runner" >"$log_file"
       TP_BASELINE_LAST_STATUS="skipped"
-      $had_errexit && set -e || set +e
+      tp_restore_errexit "$had_errexit"
       return 2
       ;;
   esac
@@ -657,6 +666,6 @@ tp_run_baseline_tests() {
     TP_BASELINE_LAST_FAILURE_TYPE="$(tp_baseline_failure_type_from_class "$TP_BASELINE_LAST_FAILURE_CLASS")"
   fi
 
-  $had_errexit && set -e || set +e
+  tp_restore_errexit "$had_errexit"
   return "$rc"
 }

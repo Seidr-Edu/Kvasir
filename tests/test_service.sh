@@ -22,14 +22,13 @@ prepare_fake_adapter_env() {
 }
 
 run_service_case() {
-  local root="$1"
+  local _root="$1"
   local log_path="$2"
   shift 2
 
   set +e
   (
-    export "$@"
-    "${TOOL_ROOT}/kvasir-service.sh"
+    env "$@" "${TOOL_ROOT}/kvasir-service.sh"
   ) >"$log_path" 2>&1
   local rc=$?
   set -e
