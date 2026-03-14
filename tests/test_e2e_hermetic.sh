@@ -93,7 +93,10 @@ case "$subcommand" in
         --add-dir)
           shift 2
           ;;
-        --json|--skip-git-repo-check|--full-auto|-)
+        --cd)
+          shift 2
+          ;;
+        --json|--skip-git-repo-check|--dangerously-bypass-approvals-and-sandbox|-)
           shift
           ;;
         *)

@@ -93,6 +93,46 @@ if obj.get("inputs", {}).get("adapter") != "codex":
 PY
 }
 
+case_codex_exec_uses_container_safe_flags() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc args_log
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+  args_log="${tmp}/codex-args.log"
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex" \
+    TPT_CODEX_ARGS_LOG="$args_log")"
+
+  tpt_assert_eq "0" "$rc" "service execution should exit 0"
+  tpt_assert_file_exists "$json_path" "service must emit json report"
+  tpt_assert_file_exists "$args_log" "fake codex must record exec arguments"
+
+  if ! grep -q -- '--dangerously-bypass-approvals-and-sandbox' "$args_log"; then
+    echo "ASSERT failed: codex exec must bypass the inner sandbox in service mode" >&2
+    return 1
+  fi
+  if grep -q -- '--full-auto' "$args_log"; then
+    echo "ASSERT failed: codex exec must not rely on --full-auto in service mode" >&2
+    return 1
+  fi
+  if ! grep -q -- '--cd' "$args_log"; then
+    echo "ASSERT failed: codex exec must set an explicit working root" >&2
+    return 1
+  fi
+  if ! grep -q -- '/ported-tests-repo' "$args_log"; then
+    echo "ASSERT failed: codex exec must target the staged ported-tests workspace" >&2
+    return 1
+  fi
+}
+
 case_manifest_driven_startup_passes() {
   local tmp original_repo generated_repo run_dir log_path json_path manifest_path rc
   tmp="$(tpt_mktemp_dir)"
@@ -409,6 +449,7 @@ case_non_writable_logs_dir_still_emits_report() {
 }
 
 tpt_run_case "env-only service startup passes" case_env_only_startup_passes
+tpt_run_case "codex exec uses container-safe flags" case_codex_exec_uses_container_safe_flags
 tpt_run_case "manifest-driven service startup passes" case_manifest_driven_startup_passes
 tpt_run_case "env overrides manifest values" case_env_overrides_manifest_values
 tpt_run_case "invalid manifest still emits report" case_invalid_manifest_still_emits_report

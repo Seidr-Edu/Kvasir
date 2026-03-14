@@ -55,6 +55,14 @@ ADAPTER
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -n "${TPT_CODEX_ARGS_LOG:-}" ]]; then
+  {
+    printf 'argv:'
+    printf ' %q' "$@"
+    printf '\n'
+  } >> "${TPT_CODEX_ARGS_LOG}"
+fi
+
 record_codex_home() {
   local capture_file="${TPT_CODEX_HOME_CAPTURE_FILE:-}"
   if [[ -n "$capture_file" ]]; then
@@ -115,7 +123,10 @@ case "$subcommand" in
         --add-dir)
           shift 2
           ;;
-        --json|--skip-git-repo-check|--full-auto|-)
+        --cd)
+          shift 2
+          ;;
+        --json|--skip-git-repo-check|--dangerously-bypass-approvals-and-sandbox|-)
           shift
           ;;
         *)
