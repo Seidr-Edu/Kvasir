@@ -111,10 +111,14 @@ run_codex_prompt() {
   set +e
   (
     cd "$working_repo_dir"
+    # Service containers are already isolated by Docker. Bypass Codex's inner
+    # sandbox so it can operate on bind-mounted workspaces reliably, including
+    # Docker Desktop's fakeowner mounts on macOS.
     local -a cmd=(
       codex exec
       --skip-git-repo-check
-      --full-auto
+      --dangerously-bypass-approvals-and-sandbox
+      --cd "$working_repo_dir"
       --add-dir "$input_dir"
     )
     if [[ ${#extra_args[@]} -gt 0 ]]; then
