@@ -45,6 +45,10 @@ tp_init_result_state() {
   TP_ITERATIONS_USED=0
   TP_ADAPTER_NONZERO_RUNS=0
   TP_WRITE_SCOPE_VIOLATION_COUNT=0
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES_CSV=""
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES_CSV=""
+  TP_POLICY_REJECTED_OVERRIDES_CSV=""
+  TP_ENFORCE_WORKSPACE_WRITE_POLICY="${TP_ENFORCE_WORKSPACE_WRITE_POLICY:-false}"
   TP_BEHAVIORAL_VERDICT="skipped"
   TP_BEHAVIORAL_VERDICT_REASON="not-run"
 
@@ -361,6 +365,10 @@ tp_execute() {
     return 0
   fi
 
+  if [[ "${TP_ENFORCE_WORKSPACE_WRITE_POLICY}" == "true" ]]; then
+    tp_apply_workspace_write_policy "$TP_PORTED_REPO"
+  fi
+
   tp_preflight_runner "$TP_PORTED_REPO" "${TP_GENERATED_EFFECTIVE_SUBDIR:-}"
   if [[ "${TP_RUNNER_PREFLIGHT_SUPPORTED}" != "true" ]]; then
     TP_STATUS="skipped"
@@ -500,6 +508,9 @@ tp_execute() {
 
   if [[ "$TP_BEST_VALID_ITERATION" -ge 0 && "$TP_REASON" != "write-scope-violation" && "$TP_REASON" != "write-scope-check-failed" ]]; then
     tp_restore_best_valid_candidate || true
+    if [[ "${TP_ENFORCE_WORKSPACE_WRITE_POLICY}" == "true" ]]; then
+      tp_apply_workspace_write_policy "$TP_PORTED_REPO"
+    fi
   elif [[ -f "$TP_EVIDENCE_JSON_PATH" ]]; then
     tp_load_evidence_state "$TP_EVIDENCE_JSON_PATH"
   fi
