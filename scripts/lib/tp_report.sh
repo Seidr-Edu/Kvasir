@@ -121,7 +121,7 @@ def read_violation_entries(path):
 
 
 def read_change_set_stats(path):
-    stats = {"A": 0, "M": 0, "D": 0, "total": 0}
+    stats = {"A": 0, "M": 0, "D": 0, "R": 0, "total": 0}
     if not path or not os.path.exists(path):
         return stats
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -393,6 +393,7 @@ obj = {
         "added": suite_changes["A"],
         "modified": suite_changes["M"],
         "deleted": suite_changes["D"],
+        "renamed": suite_changes["R"],
         "total": suite_changes["total"],
     },
     "suite_shape": {

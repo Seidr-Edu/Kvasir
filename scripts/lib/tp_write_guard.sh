@@ -3,6 +3,95 @@
 
 set -euo pipefail
 
+tp_line_in_file() {
+  local needle="$1"
+  local file="$2"
+  [[ -f "$file" ]] || return 1
+  LC_ALL=C grep -Fqx -- "$needle" "$file"
+}
+
+tp_link_count() {
+  local path="$1"
+  if stat -f '%l' "$path" >/dev/null 2>&1; then
+    stat -f '%l' "$path"
+  else
+    stat -c '%h' "$path"
+  fi
+}
+
+tp_resolve_repo_canonical_path() {
+  local repo="$1"
+  local rel="$2"
+
+  python3 - <<'PY' "$repo" "$rel"
+import os
+import sys
+
+repo = os.path.realpath(sys.argv[1])
+rel = sys.argv[2]
+if rel.startswith("./"):
+    rel = rel[2:]
+candidate = os.path.realpath(os.path.join(repo, rel))
+if os.path.commonpath([repo, candidate]) != repo:
+    raise SystemExit(1)
+print(candidate)
+PY
+}
+
+tp_is_allowed_write_operation() {
+  local kind="$1"
+  local rel="$2"
+  local old_rel="${3:-}"
+
+  case "$kind" in
+    A|M|D)
+      if tp_is_denied_write_scope_path "$rel"; then
+        return 1
+      fi
+      tp_is_allowed_test_path "$rel"
+      ;;
+    R)
+      if tp_is_denied_write_scope_path "$rel"; then
+        return 1
+      fi
+      if [[ -n "$old_rel" ]] && tp_is_denied_write_scope_path "$old_rel"; then
+        return 1
+      fi
+      tp_is_allowed_test_path "$rel" && { [[ -z "$old_rel" ]] || tp_is_allowed_test_path "$old_rel"; }
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+tp_compute_rename_pairs() {
+  local joined_file="$1"
+  local pairs_file="$2"
+  local old_paths_file="$3"
+  local new_paths_file="$4"
+
+  : > "$pairs_file"
+  : > "$old_paths_file"
+  : > "$new_paths_file"
+
+  local add_file del_file
+  add_file="$(mktemp)"
+  del_file="$(mktemp)"
+
+  awk -F $'\t' '($2 == "__MISSING__" && $3 != "__MISSING__") { print $3 "\t" $1 }' "$joined_file" | LC_ALL=C sort > "$add_file"
+  awk -F $'\t' '($3 == "__MISSING__" && $2 != "__MISSING__") { print $2 "\t" $1 }' "$joined_file" | LC_ALL=C sort > "$del_file"
+
+  if [[ -s "$add_file" && -s "$del_file" ]]; then
+    join -t $'\t' -o '1.2,2.2,1.1' "$del_file" "$add_file" > "$pairs_file" || true
+  fi
+
+  awk -F $'\t' '{ print $1 }' "$pairs_file" > "$old_paths_file"
+  awk -F $'\t' '{ print $2 }' "$pairs_file" > "$new_paths_file"
+
+  rm -f "$add_file" "$del_file"
+}
+
 tp_is_allowed_test_path() {
   local rel="$1"
   local glob
@@ -100,10 +189,29 @@ tp_write_repo_manifest() {
     if tp_is_ignored_write_scope_path "$rel"; then
       continue
     fi
+
+    local canonical_abs
+    if ! canonical_abs="$(tp_resolve_repo_canonical_path "$repo" "$rel")"; then
+      tp_err "tp_write_guard: repo path escapes canonical root: ${rel}"
+      return 2
+    fi
+
+    if [[ -L "$canonical_abs" ]]; then
+      tp_err "tp_write_guard: symlink target is not allowed in manifest: ${rel}"
+      return 2
+    fi
+
+    local nlink
+    nlink="$(tp_link_count "$canonical_abs" 2>/dev/null || echo 1)"
+    if [[ "$nlink" =~ ^[0-9]+$ ]] && [[ "$nlink" -gt 1 ]]; then
+      tp_err "tp_write_guard: hard-link alias detected for ${rel}"
+      return 2
+    fi
+
     local abs="${repo}/${rel#./}"
     printf '%s\t%s\n' "$rel" "$(tp_sha256_file "$abs")" >> "$manifest_file"
   done < <(
-    cd "$repo" && find . -type f \
+    cd "$repo" && find . -type f ! -type l \
       ! -path './.git/*' \
       ! -path './.mvn_repo/*' \
       ! -path './.m2/*' \
@@ -124,8 +232,14 @@ tp_check_write_scope() {
   local joined_file="${TP_GUARDS_DIR}/ported-protected-joined.tsv"
   local changes_file="${TP_GUARDS_DIR}/ported-protected-change-set.tsv"
   local diff_file="${TP_GUARDS_DIR}/disallowed-change.diff"
+  local rename_pairs_file="${TP_GUARDS_DIR}/ported-protected-rename-pairs.tsv"
+  local rename_old_paths_file="${TP_GUARDS_DIR}/ported-protected-rename-old-paths.tsv"
+  local rename_new_paths_file="${TP_GUARDS_DIR}/ported-protected-rename-new-paths.tsv"
 
-  tp_write_repo_manifest "$repo" "$after_file"
+  if ! tp_write_repo_manifest "$repo" "$after_file"; then
+    tp_err "tp_write_guard: failed to generate after manifest"
+    return 2
+  fi
 
   : > "$joined_file"
   : > "$changes_file"
@@ -142,6 +256,8 @@ tp_check_write_scope() {
     return 2
   fi
 
+  tp_compute_rename_pairs "$joined_file" "$rename_pairs_file" "$rename_old_paths_file" "$rename_new_paths_file"
+
   local bad=0
   local violations=0
   while IFS=$'\t' read -r rel before_hash after_hash; do
@@ -153,8 +269,14 @@ tp_check_write_scope() {
     local kind=""
     if [[ "$before_hash" == "__MISSING__" ]]; then
       kind="A"
+      if tp_line_in_file "$rel" "$rename_new_paths_file"; then
+        continue
+      fi
     elif [[ "$after_hash" == "__MISSING__" ]]; then
       kind="D"
+      if tp_line_in_file "$rel" "$rename_old_paths_file"; then
+        continue
+      fi
     elif [[ "$before_hash" != "$after_hash" ]]; then
       kind="M"
     else
@@ -163,21 +285,25 @@ tp_check_write_scope() {
 
     printf '%s\t%s\n' "$kind" "$rel" >> "$changes_file"
 
-    if tp_is_denied_write_scope_path "$rel"; then
-      printf '%s\t%s\n' "$kind" "$rel" >> "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE"
-      printf '%s\t%s\n' "$kind" "$rel" >> "$diff_file"
-      violations=$((violations + 1))
-      bad=1
-      continue
-    fi
-
-    if ! tp_is_allowed_test_path "$rel"; then
+    if ! tp_is_allowed_write_operation "$kind" "$rel"; then
       printf '%s\t%s\n' "$kind" "$rel" >> "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE"
       printf '%s\t%s\n' "$kind" "$rel" >> "$diff_file"
       violations=$((violations + 1))
       bad=1
     fi
   done < "$joined_file"
+
+  while IFS=$'\t' read -r old_rel new_rel _hash; do
+    [[ -n "$old_rel" && -n "$new_rel" ]] || continue
+    local render_rel="${old_rel} => ${new_rel}"
+    printf 'R\t%s\n' "$render_rel" >> "$changes_file"
+    if ! tp_is_allowed_write_operation "R" "$new_rel" "$old_rel"; then
+      printf 'R\t%s\n' "$render_rel" >> "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE"
+      printf 'R\t%s\n' "$render_rel" >> "$diff_file"
+      violations=$((violations + 1))
+      bad=1
+    fi
+  done < "$rename_pairs_file"
 
   TP_WRITE_SCOPE_VIOLATION_COUNT="$violations"
   return "$bad"

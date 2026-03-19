@@ -37,13 +37,13 @@ case_prefers_junit_failure_evidence() {
 
 case_insufficient_evidence_is_invalid() {
   reset_verdict_env
-  TP_REASON="insufficient-test-evidence"
-  TP_FAILURE_CLASS="undocumented-test-removal"
+  TP_REASON="retention-policy-violation"
+  TP_FAILURE_CLASS="invalid-removal-documentation"
 
   tp_compute_behavioral_verdict
 
-  tpt_assert_eq "invalid" "$TP_BEHAVIORAL_VERDICT" "insufficient evidence should be invalid"
-  tpt_assert_eq "undocumented-test-removal" "$TP_BEHAVIORAL_VERDICT_REASON" "invalid reason should preserve failure class"
+  tpt_assert_eq "invalid" "$TP_BEHAVIORAL_VERDICT" "retention-policy violations should be invalid"
+  tpt_assert_eq "invalid-removal-documentation" "$TP_BEHAVIORAL_VERDICT_REASON" "invalid reason should preserve failure class"
 }
 
 case_pass_with_removed_tests_is_inconclusive() {

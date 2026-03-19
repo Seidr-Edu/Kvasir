@@ -441,8 +441,8 @@ tp_execute() {
 
       if [[ "${TP_EVIDENCE_UNDOCUMENTED_REMOVED_TEST_COUNT:-0}" -gt 0 ]]; then
         TP_STATUS="failed"
-        TP_REASON="insufficient-test-evidence"
-        TP_FAILURE_CLASS="undocumented-test-removal"
+        TP_REASON="retention-policy-violation"
+        TP_FAILURE_CLASS="invalid-removal-documentation"
         TP_FAILURE_CLASS_LEGACY="unknown"
         TP_STATUS_DETAIL="post_pass_policy_failure"
         TP_PORTED_ORIGINAL_TESTS_STATUS="fail"
@@ -450,7 +450,7 @@ tp_execute() {
         tp_write_evidence_feedback_summary \
           "$TP_LAST_TEST_FAILURE_SUMMARY_FILE" \
           "$TP_EVIDENCE_JSON_PATH" \
-          "Original tests were removed without valid documentation. Restore them or document each removal in the required manifest." \
+          "Original tests were removed without valid retention-policy documentation. Restore them or use an allowed reason code with a concrete rationale in the required manifest." \
           "$TP_REMOVED_TESTS_MANIFEST_REL"
         if [[ "$i" -lt "$TP_MAX_ITER" ]]; then
           continue

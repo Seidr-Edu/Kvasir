@@ -22,7 +22,35 @@ import xml.etree.ElementTree as ET
 
 repo_dir, snapshot_dir, manifest_path, out_json = sys.argv[1:]
 
-ALLOWED_CATEGORIES = {"unportable", "missing-target-feature"}
+ALLOWED_CATEGORIES = {
+    "unportable",
+    "missing-target-feature",
+    "generated-layout-mismatch",
+    "unsupported-runtime-assumption",
+}
+WEAK_REASONS = {
+    "n/a",
+    "na",
+    "none",
+    "unknown",
+    "tbd",
+    "todo",
+    "same",
+    "-",
+}
+
+
+def reason_is_valid(reason):
+    if reason is None:
+        return False
+    text = reason.strip()
+    if not text:
+        return False
+    if len(text) < 12:
+        return False
+    if text.lower() in WEAK_REASONS:
+        return False
+    return True
 
 
 def normalize_rel_file(raw):
@@ -117,7 +145,7 @@ def parse_removal_manifest(path):
                 "reason": reason,
                 "well_formed": True,
                 "category_valid": category in ALLOWED_CATEGORIES,
-                "reason_valid": bool(reason),
+                "reason_valid": reason_is_valid(reason),
             }
     return rows, malformed
 
