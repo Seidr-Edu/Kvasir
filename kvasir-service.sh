@@ -333,9 +333,9 @@ kvasir_service_prepare_output_dir() {
 kvasir_service_prepare_runtime_dirs() {
   local dir
   local probe
-  mkdir -p "$TP_LOG_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR" >/dev/null 2>&1 || return 1
+  mkdir -p "$TP_LOG_DIR" "$TP_ARTIFACTS_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR" >/dev/null 2>&1 || return 1
 
-  for dir in "$TP_LOG_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR"; do
+  for dir in "$TP_LOG_DIR" "$TP_ARTIFACTS_DIR" "$TP_WORKSPACE_DIR" "$TP_SUMMARY_DIR" "$TP_GUARDS_DIR" "$TP_TMP_DIR"; do
     probe="${dir}/.kvasir-write-test.$$"
     : > "$probe" >/dev/null 2>&1 || return 1
     rm -f "$probe"
@@ -773,8 +773,16 @@ kvasir_service_main() {
     tp_refresh_evidence_state "$TP_PORTED_EFFECTIVE_REPO" "$TP_ORIGINAL_TESTS_SNAPSHOT" "$TP_REMOVED_TESTS_MANIFEST_PATH" "$TP_EVIDENCE_JSON_PATH" || true
   fi
 
+  if ! tp_promote_ported_repo_artifact; then
+    tp_warn "failed to promote ported repo artifact to ${TP_PORTED_REPO_ARTIFACT}"
+  fi
+
   if ! kvasir_service_write_reports_or_fail; then
     return 1
+  fi
+
+  if ! tp_cleanup_temporary_workspace_repos; then
+    tp_warn "failed to clean temporary workspace repo copies"
   fi
 
   tp_log "summary: $TP_SUMMARY_MD_PATH"

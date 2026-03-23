@@ -74,10 +74,14 @@ case_report_emits_ignored_prefixes() {
   TP_ADAPTER_STDERR_LOG="${tmp}/adapter-stderr.log"
   TP_ADAPTER_LAST_MESSAGE="${tmp}/adapter-last-message.md"
   TP_RUN_DIR="${tmp}"
+  TP_ARTIFACTS_DIR="${tmp}/artifacts"
   TP_LOG_DIR="${tmp}/logs"
   TP_WORKSPACE_DIR="${tmp}/workspace"
   TP_OUTPUT_DIR="${tmp}/outputs"
   TP_PORTED_REPO="${tmp}/workspace/ported-tests-repo"
+  TP_PORTED_REPO_ARTIFACT="${tmp}/artifacts/ported-tests-repo"
+  TP_PORTED_REPO_ARTIFACT_AVAILABLE="${tmp}/artifacts/ported-tests-repo"
+  TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${tmp}/artifacts/ported-tests-repo"
   TP_ORIGINAL_TESTS_SNAPSHOT="${tmp}/workspace/original-tests-snapshot"
 
   tp_build_env_reset_suite_state "TP_BASELINE_ORIGINAL"
@@ -100,7 +104,7 @@ case_report_emits_ignored_prefixes() {
   tp_build_env_suite_set "TP_PORTED_ORIGINAL" "SELECTED_JDK" "17"
   tp_build_env_suite_set "TP_PORTED_ORIGINAL" "ATTEMPTED_JDKS_CSV" "17"
 
-  mkdir -p "${tmp}/outputs" "${tmp}/workspace/ported-tests-repo/src/test/java" "${tmp}/workspace/original-tests-snapshot/src/test/java"
+  mkdir -p "${tmp}/outputs" "${tmp}/artifacts/ported-tests-repo/src/test/java" "${tmp}/workspace/ported-tests-repo/src/test/java" "${tmp}/workspace/original-tests-snapshot/src/test/java"
   echo "digest" > "$TP_GENERATED_BEFORE_HASH_PATH"
   echo "digest" > "$TP_GENERATED_AFTER_HASH_PATH"
   cat > "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE" <<'TSV'
@@ -137,6 +141,11 @@ JSON
   echo "class AdaptedTest {}" > "${TP_PORTED_REPO}/src/test/java/AdaptedTest.java"
   mkdir -p "${TP_PORTED_REPO}/target/surefire-reports"
   cat > "${TP_PORTED_REPO}/target/surefire-reports/TEST-fake.xml" <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="ok"/></testsuite>
+XML
+  echo "class AdaptedTest {}" > "${TP_PORTED_REPO_ARTIFACT}/src/test/java/AdaptedTest.java"
+  mkdir -p "${TP_PORTED_REPO_ARTIFACT}/target/surefire-reports"
+  cat > "${TP_PORTED_REPO_ARTIFACT}/target/surefire-reports/TEST-fake.xml" <<'XML'
 <testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="ok"/></testsuite>
 XML
   echo "class OriginalTest {}" > "${TP_ORIGINAL_TESTS_SNAPSHOT}/src/test/java/OriginalTest.java"
@@ -184,6 +193,9 @@ if generated_env.get("attempted_jdks") != ["11", "17"]:
     raise SystemExit(f"unexpected generated attempted_jdks: {generated_env}")
 if generated_env.get("hint", {}).get("source") != "lidskjalv-generated":
     raise SystemExit(f"unexpected generated hint source: {generated_env}")
+artifacts = obj.get("artifacts", {})
+if artifacts.get("ported_repo") is None:
+    raise SystemExit(f"expected promoted ported repo artifact, got {artifacts}")
 PY
 
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Write-scope ignored prefixes" "summary should mention ignored prefixes"

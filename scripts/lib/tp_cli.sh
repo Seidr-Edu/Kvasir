@@ -31,6 +31,7 @@ EOF
 
 tp_configure_run_layout() {
   TP_LOG_DIR="${TP_RUN_DIR}/logs"
+  TP_ARTIFACTS_DIR="${TP_RUN_DIR}/artifacts"
   TP_WORKSPACE_DIR="${TP_RUN_DIR}/workspace"
   TP_OUTPUT_DIR="${TP_RUN_DIR}/outputs"
   TP_SUMMARY_DIR="${TP_WORKSPACE_DIR}/summaries"
@@ -42,6 +43,8 @@ tp_configure_run_layout() {
   TP_ORIGINAL_BASELINE_REPO="${TP_WORKSPACE_DIR}/original-baseline-repo"
   TP_GENERATED_BASELINE_REPO="${TP_WORKSPACE_DIR}/generated-baseline-repo"
   TP_PORTED_REPO="${TP_WORKSPACE_DIR}/ported-tests-repo"
+  TP_PORTED_REPO_ARTIFACT="${TP_ARTIFACTS_DIR}/ported-tests-repo"
+  TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${TP_PORTED_REPO_ARTIFACT}"
   TP_PORTED_EFFECTIVE_REPO="${TP_PORTED_REPO}"
   TP_GENERATED_BASELINE_EFFECTIVE_REPO="${TP_GENERATED_BASELINE_REPO}"
   TP_ORIGINAL_TESTS_SNAPSHOT="${TP_WORKSPACE_DIR}/original-tests-snapshot"
