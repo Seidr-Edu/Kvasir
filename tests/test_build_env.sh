@@ -113,6 +113,43 @@ case_discover_jdks_uses_override_search_dirs() {
   tpt_assert_eq $'17\n11' "$listed" "discovered JDKs should be sorted high to low"
 }
 
+case_discover_jdks_tolerates_unset_home() {
+  local rc
+
+  set +e
+  (
+    unset HOME
+    unset TP_BUILD_ENV_JDK_SEARCH_DIRS
+    TP_BUILD_ENV_PLATFORM_OVERRIDE="Linux"
+    tp_build_env_reset_discovered_jdks
+    tp_build_env_discover_jdks
+  )
+  rc=$?
+  set -e
+
+  tpt_assert_eq "0" "$rc" "linux JDK discovery should not fail when HOME is unset"
+}
+
+case_discover_jdks_handles_double_quoted_paths() {
+  local tmp root jdk17
+  tmp="$(tpt_mktemp_dir)"
+  root="${tmp}/jdks\"quoted"
+  mkdir -p "$root"
+
+  jdk17="$(make_fake_jdk "$root" 17)"
+
+  TP_BUILD_ENV_PLATFORM_OVERRIDE="Linux"
+  TP_BUILD_ENV_JDK_SEARCH_DIRS="$root"
+  tp_build_env_reset_discovered_jdks
+  tp_build_env_discover_jdks
+
+  tpt_assert_eq "$jdk17" "$(tp_build_env_get_jdk_home "17")" "JDK discovery should preserve quoted install paths"
+  if ! tp_build_env_select_jdk "17"; then
+    tpt_fail "quoted JDK home should still be selectable"
+  fi
+  tpt_assert_eq "$jdk17" "${JAVA_HOME:-}" "selected JDK should export the discovered quoted home"
+}
+
 case_baseline_retries_toolchain_failure_and_caches_generated_jdk() {
   local tmp root repo log_file jdk_log rc attempts
   tmp="$(tpt_mktemp_dir)"
@@ -216,6 +253,8 @@ case_assertion_failures_do_not_retry_across_jdks() {
 }
 
 tpt_run_case "discover jdks uses override search dirs" case_discover_jdks_uses_override_search_dirs
+tpt_run_case "discover jdks tolerates unset home" case_discover_jdks_tolerates_unset_home
+tpt_run_case "discover jdks handles double quoted paths" case_discover_jdks_handles_double_quoted_paths
 tpt_run_case "baseline retries toolchain failure and caches generated jdk" case_baseline_retries_toolchain_failure_and_caches_generated_jdk
 tpt_run_case "ported prefers generated successful jdk" case_ported_prefers_generated_successful_jdk
 tpt_run_case "assertion failures do not retry across jdks" case_assertion_failures_do_not_retry_across_jdks

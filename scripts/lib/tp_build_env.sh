@@ -6,15 +6,23 @@ set -euo pipefail
 TP_BUILD_ENV_AVAILABLE_JDKS=()
 TP_BUILD_ENV_DISCOVERED_JDK_KEYS=()
 
+tp_build_env_jdk_home_var_name() {
+  printf '_TP_BUILD_ENV_JDK_HOME_%s' "$1"
+}
+
 tp_build_env_set_jdk_home() {
   local version="$1"
   local path="$2"
-  eval "_TP_BUILD_ENV_JDK_HOME_${version}=\"${path}\""
+  local var_name
+  var_name="$(tp_build_env_jdk_home_var_name "$version")"
+  printf -v "$var_name" '%s' "$path"
 }
 
 tp_build_env_get_jdk_home() {
   local version="$1"
-  eval "printf '%s' \"\${_TP_BUILD_ENV_JDK_HOME_${version}:-}\""
+  local var_name
+  var_name="$(tp_build_env_jdk_home_var_name "$version")"
+  printf '%s' "${!var_name:-}"
 }
 
 tp_build_env_has_jdk_home() {
@@ -88,7 +96,11 @@ tp_build_env_discover_jdks_macos() {
 }
 
 tp_build_env_discover_jdks_linux() {
-  local search_roots="${TP_BUILD_ENV_JDK_SEARCH_DIRS:-/usr/lib/jvm:/usr/java:/opt/java:${HOME}/.sdkman/candidates/java}"
+  local search_roots_default="/usr/lib/jvm:/usr/java:/opt/java"
+  if [[ -n "${HOME:-}" ]]; then
+    search_roots_default="${search_roots_default}:${HOME}/.sdkman/candidates/java"
+  fi
+  local search_roots="${TP_BUILD_ENV_JDK_SEARCH_DIRS:-$search_roots_default}"
   local -a roots=()
   local root
   local IFS=':'
@@ -291,21 +303,27 @@ tp_build_env_suite_prefix() {
   printf '%s_BUILD_ENV' "$1"
 }
 
+tp_build_env_suite_var_name() {
+  local suite="$1"
+  local field="$2"
+  printf '%s_%s' "$(tp_build_env_suite_prefix "$suite")" "$field"
+}
+
 tp_build_env_suite_set() {
   local suite="$1"
   local field="$2"
   local value="${3:-}"
-  local prefix
-  prefix="$(tp_build_env_suite_prefix "$suite")"
-  printf -v "${prefix}_${field}" '%s' "$value"
+  local var_name
+  var_name="$(tp_build_env_suite_var_name "$suite" "$field")"
+  printf -v "$var_name" '%s' "$value"
 }
 
 tp_build_env_suite_get() {
   local suite="$1"
   local field="$2"
-  local prefix
-  prefix="$(tp_build_env_suite_prefix "$suite")"
-  eval "printf '%s' \"\${${prefix}_${field}:-}\""
+  local var_name
+  var_name="$(tp_build_env_suite_var_name "$suite" "$field")"
+  printf '%s' "${!var_name:-}"
 }
 
 tp_build_env_suite_append_attempted_jdk() {
@@ -380,7 +398,8 @@ tp_build_env_prepare_suite_state() {
   local hint_field
   for hint_field in BUILD_TOOL BUILD_JDK JAVA_VERSION_HINT BUILD_SUBDIR SOURCE; do
     local value=""
-    eval "value=\"\${TP_HINT_${hint_kind}_${hint_field}:-}\""
+    local hint_var_name="TP_HINT_${hint_kind}_${hint_field}"
+    value="${!hint_var_name:-}"
     tp_build_env_suite_set "$suite" "HINT_${hint_field}" "$value"
   done
 }
