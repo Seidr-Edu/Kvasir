@@ -97,7 +97,7 @@ tp_is_allowed_test_path() {
   local glob
   for glob in "${TP_ALLOWED_MODEL_TEST_WRITES_GLOBS[@]+"${TP_ALLOWED_MODEL_TEST_WRITES_GLOBS[@]}"}"; do
     case "$rel" in
-      $glob)
+      "$glob")
         return 0
         ;;
     esac
