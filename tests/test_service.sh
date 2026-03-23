@@ -90,7 +90,29 @@ if obj.get("status") != "passed":
     raise SystemExit(f"expected passed status, got {obj.get('status')!r}")
 if obj.get("inputs", {}).get("adapter") != "codex":
     raise SystemExit(f"expected codex adapter, got {obj.get('inputs', {}).get('adapter')!r}")
+if not obj.get("artifacts", {}).get("ported_repo"):
+    raise SystemExit(f"expected promoted ported repo artifact, got {obj.get('artifacts')!r}")
 PY
+  [[ -d "${run_dir}/artifacts/ported-tests-repo" ]] || {
+    echo "ASSERT failed: service should promote the final ported repo" >&2
+    return 1
+  }
+  [[ ! -e "${run_dir}/workspace/original-baseline-repo" ]] || {
+    echo "ASSERT failed: service should clean original baseline copy" >&2
+    return 1
+  }
+  [[ ! -e "${run_dir}/workspace/generated-baseline-repo" ]] || {
+    echo "ASSERT failed: service should clean generated baseline copy" >&2
+    return 1
+  }
+  [[ ! -e "${run_dir}/workspace/ported-tests-repo" ]] || {
+    echo "ASSERT failed: service should clean workspace ported repo copy" >&2
+    return 1
+  }
+  [[ ! -e "${run_dir}/workspace/original-tests-snapshot" ]] || {
+    echo "ASSERT failed: service should clean original test snapshot" >&2
+    return 1
+  }
 }
 
 case_codex_exec_uses_container_safe_flags() {

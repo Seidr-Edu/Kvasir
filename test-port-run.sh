@@ -247,10 +247,12 @@ tp_configure_generated_effective_roots() {
     TP_GENERATED_EFFECTIVE_PATH="${TP_GENERATED_REPO}/${TP_GENERATED_EFFECTIVE_SUBDIR}"
     TP_GENERATED_BASELINE_EFFECTIVE_REPO="${TP_GENERATED_BASELINE_REPO}/${TP_GENERATED_EFFECTIVE_SUBDIR}"
     TP_PORTED_EFFECTIVE_REPO="${TP_PORTED_REPO}/${TP_GENERATED_EFFECTIVE_SUBDIR}"
+    TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${TP_PORTED_REPO_ARTIFACT}/${TP_GENERATED_EFFECTIVE_SUBDIR}"
   else
     TP_GENERATED_EFFECTIVE_PATH="${TP_GENERATED_REPO}"
     TP_GENERATED_BASELINE_EFFECTIVE_REPO="${TP_GENERATED_BASELINE_REPO}"
     TP_PORTED_EFFECTIVE_REPO="${TP_PORTED_REPO}"
+    TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${TP_PORTED_REPO_ARTIFACT}"
   fi
 }
 
@@ -557,7 +559,13 @@ main() {
   fi
 
   tp_compute_behavioral_verdict
+  if ! tp_promote_ported_repo_artifact; then
+    tp_warn "failed to promote ported repo artifact to ${TP_PORTED_REPO_ARTIFACT}"
+  fi
   tp_write_reports
+  if ! tp_cleanup_temporary_workspace_repos; then
+    tp_warn "failed to clean temporary workspace repo copies"
+  fi
 
   tp_log "summary: $TP_SUMMARY_MD_PATH"
   tp_log "json: $TP_JSON_PATH"

@@ -297,7 +297,11 @@ for expected in ("./completion/proof/logs/", "./.mvn_repo/", "./.m2/"):
         raise SystemExit(f"missing ignored prefix: {expected}")
 PY
 
-  tpt_assert_file_exists "${run_dir}/workspace/.m2/repository/dependency.txt" "maven local repo should be rooted in run workspace"
+  tpt_assert_file_exists "${run_dir}/artifacts/ported-tests-repo/src/test/java/OriginalFixtureTest.java" "final ported repo should be promoted to a canonical artifact"
+  if [[ -e "${run_dir}/workspace/.m2" ]]; then
+    echo "ASSERT failed: temporary maven cache should be cleaned after the run" >&2
+    return 1
+  fi
 }
 
 case_disallowed_source_write_fails() {

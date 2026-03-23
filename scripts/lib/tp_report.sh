@@ -3,9 +3,52 @@
 
 set -euo pipefail
 
+tp_promote_ported_repo_artifact() {
+  TP_PORTED_REPO_ARTIFACT_AVAILABLE=""
+  TP_PORTED_REPO_ARTIFACT_EFFECTIVE=""
+
+  [[ -n "${TP_PORTED_REPO_ARTIFACT:-}" ]] || return 0
+  [[ -d "${TP_PORTED_REPO:-}" ]] || return 0
+
+  tp_copy_dir "$TP_PORTED_REPO" "$TP_PORTED_REPO_ARTIFACT" || return 1
+  TP_PORTED_REPO_ARTIFACT_AVAILABLE="$TP_PORTED_REPO_ARTIFACT"
+  if [[ -n "${TP_GENERATED_EFFECTIVE_SUBDIR:-}" ]] && [[ -d "${TP_PORTED_REPO_ARTIFACT}/${TP_GENERATED_EFFECTIVE_SUBDIR}" ]]; then
+    TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${TP_PORTED_REPO_ARTIFACT}/${TP_GENERATED_EFFECTIVE_SUBDIR}"
+  else
+    TP_PORTED_REPO_ARTIFACT_EFFECTIVE="$TP_PORTED_REPO_ARTIFACT"
+  fi
+}
+
+tp_cleanup_temporary_workspace_repos() {
+  local path
+  for path in \
+    "${TP_ORIGINAL_BASELINE_REPO:-}" \
+    "${TP_GENERATED_BASELINE_REPO:-}" \
+    "${TP_PORTED_REPO:-}" \
+    "${TP_ORIGINAL_TESTS_SNAPSHOT:-}" \
+    "${TP_BEST_VALID_PORTED_REPO:-}" \
+    "${TP_TMP_DIR:-}"; do
+    [[ -n "$path" ]] || continue
+    rm -rf "$path"
+  done
+
+  if [[ -n "${TP_WORKSPACE_DIR:-}" ]]; then
+    rm -rf "${TP_WORKSPACE_DIR}/.m2" "${TP_WORKSPACE_DIR}/.gradle"
+  fi
+}
+
 tp_write_reports() {
   local finished
+  local report_ported_repo
+  local ported_repo_artifact
+  local ported_repo_artifact_effective
   finished="$(tp_timestamp_iso_utc)"
+  report_ported_repo="${TP_PORTED_REPO_ARTIFACT_EFFECTIVE:-${TP_PORTED_EFFECTIVE_REPO:-$TP_PORTED_REPO}}"
+  ported_repo_artifact="${TP_PORTED_REPO_ARTIFACT_AVAILABLE:-}"
+  ported_repo_artifact_effective=""
+  if [[ -n "$ported_repo_artifact" ]]; then
+    ported_repo_artifact_effective="${TP_PORTED_REPO_ARTIFACT_EFFECTIVE:-$ported_repo_artifact}"
+  fi
 
   TP_REPORT_BASELINE_ORIGINAL_BUILD_ENV_JSON="$(tp_build_env_suite_report_json "TP_BASELINE_ORIGINAL")" \
   TP_REPORT_BASELINE_GENERATED_BUILD_ENV_JSON="$(tp_build_env_suite_report_json "TP_BASELINE_GENERATED")" \
@@ -35,7 +78,7 @@ tp_write_reports() {
     "${TP_PORTED_ORIGINAL_TESTS_DISCOVERED:-0}" "${TP_PORTED_ORIGINAL_TESTS_EXECUTED:-0}" "${TP_PORTED_ORIGINAL_TESTS_FAILED:-0}" "${TP_PORTED_ORIGINAL_TESTS_ERRORS:-0}" "${TP_PORTED_ORIGINAL_TESTS_SKIPPED:-0}" "${TP_PORTED_ORIGINAL_JUNIT_REPORTS_FOUND:-0}" \
     "$TP_ADAPTER_EVENTS_LOG" "$TP_ADAPTER_STDERR_LOG" "$TP_ADAPTER_LAST_MESSAGE" \
     "$TP_RUN_DIR" "$TP_LOG_DIR" "$TP_WORKSPACE_DIR" "$TP_OUTPUT_DIR" \
-    "${TP_PORTED_EFFECTIVE_REPO:-$TP_PORTED_REPO}" "$TP_ORIGINAL_TESTS_SNAPSHOT"
+    "$ported_repo_artifact" "$ported_repo_artifact_effective" "$report_ported_repo" "$TP_ORIGINAL_TESTS_SNAPSHOT"
 import glob
 import json
 import os
@@ -67,7 +110,7 @@ import xml.etree.ElementTree as ET
   ported_tests_discovered, ported_tests_executed, ported_tests_failed, ported_tests_errors, ported_tests_skipped, ported_junit_reports_found,
   adapter_events_log, adapter_stderr_log, adapter_last_message,
   run_dir, log_dir, workspace_dir, output_dir,
-  ported_repo_dir, original_tests_snapshot_dir
+  ported_repo_artifact, ported_repo_effective_dir, ported_repo_dir, original_tests_snapshot_dir
 ) = sys.argv[1:]
 
 
@@ -440,6 +483,8 @@ obj = {
         "logs_dir": log_dir,
         "workspace_dir": workspace_dir,
         "outputs_dir": output_dir,
+        "ported_repo": ported_repo_artifact or None,
+        "ported_effective_repo": ported_repo_effective_dir or None,
         "summary_md": summary_path,
     },
 }
@@ -475,6 +520,7 @@ summary_lines = [
     f"- Write-scope policy: **{obj['write_scope']['policy']}**",
     f"- Write-scope ignored prefixes: **{', '.join(obj['write_scope']['ignored_prefixes']) if obj['write_scope']['ignored_prefixes'] else '<none>'}**",
     f"- Write-scope violations: **{obj['write_scope']['violation_count']}**",
+    f"- Ported repo artifact: {obj['artifacts'].get('ported_repo') or '<none>'}",
     f"- Retention policy: **{obj['retention_policy']['mode']}**",
     f"- Documented removals required: **{str(obj['retention_policy']['documented_removals_required']).lower()}**",
     f"- Removal manifest: **{obj['retention_policy']['manifest_rel_path'] or '<none>'}**",
