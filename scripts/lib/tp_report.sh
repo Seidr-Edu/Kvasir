@@ -17,7 +17,7 @@ tp_write_reports() {
     "${TP_RUNNER_PREFLIGHT_DETECTED_RUNNER:-unknown}" "${TP_RUNNER_PREFLIGHT_SUPPORTED:-false}" "${TP_RUNNER_PREFLIGHT_MISSING_CAPABILITIES_CSV:-}" "${TP_RUNNER_PREFLIGHT_MODULE_ROOT:-}" "${TP_RUNNER_PREFLIGHT_FRAMEWORKS_DETECTED_CSV:-}" \
     "$TP_GENERATED_REPO_UNCHANGED" "$TP_GENERATED_BEFORE_HASH_PATH" "$TP_GENERATED_AFTER_HASH_PATH" \
     "$TP_WRITE_SCOPE_VIOLATION_COUNT" "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE" "$TP_WRITE_SCOPE_DIFF_FILE" "$TP_WRITE_SCOPE_CHANGE_SET_PATH" \
-    "$TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV" \
+    "$TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV" "${TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES_CSV:-}" "${TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES_CSV:-}" "${TP_POLICY_REJECTED_OVERRIDES_CSV:-}" \
     "$TP_EVIDENCE_JSON_PATH" "$TP_REMOVED_TESTS_MANIFEST_REL" "$TP_RETENTION_POLICY_MODE" "$TP_RETENTION_DOCUMENTED_REMOVALS_REQUIRED" \
     "$TP_BASELINE_ORIGINAL_STATUS" "$TP_BASELINE_ORIGINAL_RC" "$TP_BASELINE_ORIGINAL_LOG" \
     "$TP_BASELINE_ORIGINAL_STRATEGY" "$TP_BASELINE_ORIGINAL_UNIT_ONLY_RC" "$TP_BASELINE_ORIGINAL_FULL_RC" \
@@ -49,7 +49,7 @@ import xml.etree.ElementTree as ET
   preflight_runner, preflight_supported, preflight_missing_csv, preflight_module_root, preflight_frameworks_csv,
   generated_unchanged, generated_before_hash_path, generated_after_hash_path,
   write_scope_violation_count, write_scope_fail_paths, write_scope_diff_path, write_scope_change_set_path,
-  write_scope_ignored_prefixes_csv,
+    write_scope_ignored_prefixes_csv, write_scope_service_artifact_prefixes_csv, write_scope_denied_prefixes_csv, write_scope_rejected_overrides_csv,
   evidence_json_path, removed_tests_manifest_rel, retention_policy_mode, retention_documented_removals_required,
   baseline_orig_status, baseline_orig_rc, baseline_orig_log,
   baseline_orig_strategy, baseline_orig_unit_rc, baseline_orig_full_rc,
@@ -121,7 +121,7 @@ def read_violation_entries(path):
 
 
 def read_change_set_stats(path):
-    stats = {"A": 0, "M": 0, "D": 0, "total": 0}
+    stats = {"A": 0, "M": 0, "D": 0, "R": 0, "total": 0}
     if not path or not os.path.exists(path):
         return stats
     with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -319,6 +319,9 @@ obj = {
         "diff_path": write_scope_diff_path,
         "change_set_path": write_scope_change_set_path,
         "ignored_prefixes": split_csv(write_scope_ignored_prefixes_csv),
+        "allowed_service_artifacts": split_csv(write_scope_service_artifact_prefixes_csv),
+        "immutable_or_denied_targets": split_csv(write_scope_denied_prefixes_csv),
+        "rejected_overrides": split_csv(write_scope_rejected_overrides_csv),
     },
     "baseline_original_tests": {
         "status": baseline_orig_status,
@@ -390,6 +393,7 @@ obj = {
         "added": suite_changes["A"],
         "modified": suite_changes["M"],
         "deleted": suite_changes["D"],
+        "renamed": suite_changes["R"],
         "total": suite_changes["total"],
     },
     "suite_shape": {

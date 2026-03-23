@@ -65,13 +65,54 @@ tp_configure_run_layout() {
   TP_BEST_VALID_PORTED_REPO="${TP_WORKSPACE_DIR}/best-valid-ported-tests-repo"
   TP_REMOVED_TESTS_MANIFEST_REL="./completion/proof/logs/test-port-removed-tests.tsv"
   TP_REMOVED_TESTS_MANIFEST_PATH="${TP_PORTED_REPO}/${TP_REMOVED_TESTS_MANIFEST_REL#./}"
+  TP_POLICY_REJECTED_OVERRIDES_FILE="${TP_SUMMARY_DIR}/rejected-policy-overrides.txt"
 
   TP_JSON_PATH="${TP_OUTPUT_DIR}/test_port.json"
   TP_SUMMARY_MD_PATH="${TP_OUTPUT_DIR}/summary.md"
 }
 
-tp_resolve_write_scope_ignored_prefixes() {
-  local -a builtins=(
+tp_is_forbidden_policy_override_prefix() {
+  local prefix="$1"
+  case "$prefix" in
+    "./"|"./src/"|"./src/main/"|"./.github/"|"./scripts/"|"./docs/"|"./README.md/"|"./pom.xml/")
+      return 0
+      ;;
+  esac
+
+  case "$prefix" in
+    *'*'*|*'?'*|*'['*|*']'*)
+      return 0
+      ;;
+  esac
+
+  local denied
+  for denied in "${TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES[@]+"${TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES[@]}"}"; do
+    case "$prefix" in
+      "${denied}"*|"${denied}")
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+tp_resolve_write_scope_policy_classes() {
+  TP_ALLOWED_MODEL_TEST_WRITES_GLOBS=(
+    "./src/test/*"
+    "./src/*Test*/*"
+    "./test/*"
+    "./tests/*"
+  )
+
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES=(
+    "./src/main/"
+    "./scripts/"
+    "./docs/"
+    "./.github/"
+  )
+
+  local -a builtin_service_artifact_prefixes=(
     "./completion/proof/logs/"
     "./.mvn_repo/"
     "./.m2/"
@@ -79,9 +120,21 @@ tp_resolve_write_scope_ignored_prefixes() {
     "./target/"
     "./build/"
   )
-  local -a all_raw=("${builtins[@]}")
+
+  local -a all_raw=("${builtin_service_artifact_prefixes[@]}")
   local -a env_raw=()
   local raw_env="${TP_WRITE_SCOPE_IGNORE_PREFIXES:-}"
+  TP_POLICY_REJECTED_OVERRIDES=()
+
+  if [[ -z "${TP_POLICY_REJECTED_OVERRIDES_FILE:-}" ]]; then
+    local fallback_dir
+    fallback_dir="${TP_SUMMARY_DIR:-${TP_RUN_DIR:-/tmp}}"
+    TP_POLICY_REJECTED_OVERRIDES_FILE="${fallback_dir}/rejected-policy-overrides.txt"
+  fi
+
+  mkdir -p "$(dirname "$TP_POLICY_REJECTED_OVERRIDES_FILE")"
+  : > "$TP_POLICY_REJECTED_OVERRIDES_FILE"
+
   if [[ -n "$raw_env" ]]; then
     if [[ "$raw_env" == :* || "$raw_env" == *: || "$raw_env" == *"::"* ]]; then
       tp_err "TP_WRITE_SCOPE_IGNORE_PREFIXES contains empty entries"
@@ -93,7 +146,7 @@ tp_resolve_write_scope_ignored_prefixes() {
   fi
   all_raw+=("${TP_WRITE_SCOPE_IGNORE_PREFIXES_CLI[@]+"${TP_WRITE_SCOPE_IGNORE_PREFIXES_CLI[@]}"}")
 
-  TP_WRITE_SCOPE_IGNORED_PREFIXES=()
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES=()
   local seen='|'
   local raw
   local normalized
@@ -102,14 +155,27 @@ tp_resolve_write_scope_ignored_prefixes() {
       tp_err "invalid write-scope ignore prefix: '$raw'"
       return 1
     }
+
+    if tp_is_forbidden_policy_override_prefix "$normalized"; then
+      TP_POLICY_REJECTED_OVERRIDES+=("$normalized")
+      printf '%s\n' "$normalized" >> "$TP_POLICY_REJECTED_OVERRIDES_FILE"
+      continue
+    fi
+
     case "$seen" in
       *"|${normalized}|"*) continue ;;
     esac
     seen="${seen}${normalized}|"
-    TP_WRITE_SCOPE_IGNORED_PREFIXES+=("$normalized")
+    TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES+=("$normalized")
   done
 
-  TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV="$(IFS=:; printf '%s' "${TP_WRITE_SCOPE_IGNORED_PREFIXES[*]}")"
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES_CSV="$(IFS=:; printf '%s' "${TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES[*]-}")"
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES_CSV="$(IFS=:; printf '%s' "${TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES[*]-}")"
+  TP_POLICY_REJECTED_OVERRIDES_CSV="$(IFS=:; printf '%s' "${TP_POLICY_REJECTED_OVERRIDES[*]-}")"
+
+  # Compatibility for existing report/test consumers.
+  TP_WRITE_SCOPE_IGNORED_PREFIXES=("${TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES[@]+"${TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES[@]}"}")
+  TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV="$TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES_CSV"
 }
 
 tp_parse_args() {
@@ -157,7 +223,7 @@ tp_validate_and_finalize_args() {
   [[ -n "$TP_ADAPTER" ]] || tp_fail "--adapter is required"
   [[ "$TP_MAX_ITER" =~ ^[0-9]+$ ]] || tp_fail "--max-iter must be non-negative integer"
   [[ "$TP_WRITE_SCOPE_POLICY" == "tests-only" ]] || tp_fail "--write-scope-policy must be tests-only"
-  tp_resolve_write_scope_ignored_prefixes || return 1
+  tp_resolve_write_scope_policy_classes || return 1
 
   TP_GENERATED_REPO="$(tp_abs_path "$TP_GENERATED_REPO")"
   TP_ORIGINAL_REPO="$(tp_abs_path "$TP_ORIGINAL_REPO")"

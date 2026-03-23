@@ -210,11 +210,15 @@ Allowed categories:
 
 - `unportable`
 - `missing-target-feature`
+- `generated-layout-mismatch`
+- `unsupported-runtime-assumption`
 
-Undocumented removed original tests fail the iteration with:
+Undocumented or invalidly documented removed original tests fail the iteration with:
 
-- `reason=insufficient-test-evidence`
-- `failure_class=undocumented-test-removal`
+- `reason=retention-policy-violation`
+- `failure_class=invalid-removal-documentation`
+
+The reason column must include a concrete, non-placeholder rationale.
 
 Detailed entries are reported in `test_port.json` under `removed_original_tests`.
 

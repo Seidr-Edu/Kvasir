@@ -22,9 +22,9 @@ tp_compute_behavioral_verdict() {
       if [[ "$TP_REASON" == "write-scope-violation" ]]; then
         TP_BEHAVIORAL_VERDICT="invalid"
         TP_BEHAVIORAL_VERDICT_REASON="write-scope-violation"
-      elif [[ "$TP_REASON" == "insufficient-test-evidence" ]]; then
+      elif [[ "$TP_REASON" == "insufficient-test-evidence" || "$TP_REASON" == "retention-policy-violation" ]]; then
         TP_BEHAVIORAL_VERDICT="invalid"
-        TP_BEHAVIORAL_VERDICT_REASON="${TP_FAILURE_CLASS:-insufficient-test-evidence}"
+        TP_BEHAVIORAL_VERDICT_REASON="${TP_FAILURE_CLASS:-retention-policy-violation}"
       elif [[ "$failing_case_count" -gt 0 || "$TP_REASON" == "behavioral-difference-evidence" || "$TP_FAILURE_CLASS" == "assertion-failure" ]]; then
         TP_BEHAVIORAL_VERDICT="difference_detected"
         TP_BEHAVIORAL_VERDICT_REASON="assertion-mismatch-evidence"

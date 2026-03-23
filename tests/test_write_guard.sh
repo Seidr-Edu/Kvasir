@@ -29,8 +29,86 @@ setup_guard_env() {
     "./.mvn_repo/"
     "./.m2/"
   )
+  TP_ALLOWED_MODEL_TEST_WRITES_GLOBS=(
+    "./src/test/*"
+    "./src/*Test*/*"
+    "./test/*"
+    "./tests/*"
+  )
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES=()
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES=(
+    "./src/main/"
+    "./scripts/"
+    "./docs/"
+    "./.github/"
+  )
   mkdir -p "$TP_GUARDS_DIR"
   : > "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE"
+}
+
+case_rename_test_path_is_allowed() {
+  local tmp repo before after
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  before="${tmp}/before.tsv"
+  after="${tmp}/after.tsv"
+
+  create_base_repo "$repo"
+  setup_guard_env "$tmp"
+
+  tp_write_repo_manifest "$repo" "$before"
+  mv "${repo}/src/test/java/SampleTest.java" "${repo}/src/test/java/RenamedSampleTest.java"
+
+  tp_check_write_scope "$repo" "$before" "$after"
+  tpt_assert_eq "0" "$TP_WRITE_SCOPE_VIOLATION_COUNT" "rename inside test paths should be allowed"
+  tpt_assert_file_contains "${TP_GUARDS_DIR}/ported-protected-change-set.tsv" $'R\t./src/test/java/SampleTest.java => ./src/test/java/RenamedSampleTest.java' "rename should be recorded as operation R"
+}
+
+case_rename_into_denied_path_is_rejected() {
+  local tmp repo before after rc
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  before="${tmp}/before.tsv"
+  after="${tmp}/after.tsv"
+
+  create_base_repo "$repo"
+  setup_guard_env "$tmp"
+
+  tp_write_repo_manifest "$repo" "$before"
+  mv "${repo}/src/test/java/SampleTest.java" "${repo}/src/main/java/SampleTest.java"
+
+  if tp_check_write_scope "$repo" "$before" "$after"; then
+    echo "expected rename into denied path to fail" >&2
+    return 1
+  else
+    rc=$?
+  fi
+
+  tpt_assert_eq "1" "$rc" "rename into denied path must fail"
+  tpt_assert_file_contains "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE" "./src/test/java/SampleTest.java => ./src/main/java/SampleTest.java" "failure list should include denied rename"
+}
+
+case_manifest_rejects_escape_path() {
+  local tmp repo before rc
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  before="${tmp}/before.tsv"
+
+  create_base_repo "$repo"
+  setup_guard_env "$tmp"
+
+  mkdir -p "${repo}/src/test/java/escape"
+  ln -s ../../../../.. "${repo}/src/test/java/escape/root-link"
+  if tp_write_repo_manifest "$repo" "$before"; then
+    # The symlink itself is ignored by find -type f; add an escaped rel check directly.
+    if tp_resolve_repo_canonical_path "$repo" "./src/test/java/escape/../../../../../../../../etc/passwd" >/dev/null 2>&1; then
+      echo "expected canonical escape path resolution to fail" >&2
+      return 1
+    fi
+  else
+    rc=$?
+    tpt_assert_eq "2" "$rc" "manifest escape detection failures should return 2"
+  fi
 }
 
 case_allows_test_path_modifications() {
@@ -171,5 +249,8 @@ tpt_run_case "ignores completion/proof/logs churn" case_ignores_completion_proof
 tpt_run_case "ignores .mvn_repo churn" case_ignores_mvn_repo_changes
 tpt_run_case "ignores .m2 churn" case_ignores_m2_repo_changes
 tpt_run_case "custom ignore does not mask other writes" case_custom_ignore_does_not_mask_other_paths
+tpt_run_case "rename in test paths is allowed" case_rename_test_path_is_allowed
+tpt_run_case "rename into denied path is rejected" case_rename_into_denied_path_is_rejected
+tpt_run_case "canonical escape path is rejected" case_manifest_rejects_escape_path
 
 tpt_finish_suite

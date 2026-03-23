@@ -32,6 +32,8 @@ Environment:
   KVASIR_GENERATED_SUBDIR                Optional
   KVASIR_MAX_ITER                        Optional non-negative integer
   KVASIR_WRITE_SCOPE_IGNORE_PREFIXES     Optional colon-separated repo-relative prefixes
+  KVASIR_STRICT_WRITE_SCOPE_OVERRIDES    Optional (default: true). When true, reject external write-scope overrides.
+  KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES     Optional (default: false). Set true to allow overrides when strict mode is enabled.
 
 Provider mounts (for adapter=codex):
   Read-only: /opt/provider/bin
@@ -345,6 +347,8 @@ kvasir_service_main() {
   local resolved_diagram=""
   local resolved_max_iter="5"
   local resolved_write_scope_prefixes=""
+  local strict_write_scope_overrides="${KVASIR_STRICT_WRITE_SCOPE_OVERRIDES:-true}"
+  local allow_write_scope_overrides="${KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES:-false}"
   local service_exit_code=0
 
   TP_RUN_ID="$(tp_timestamp_compact_utc)__service__test-port"
@@ -367,6 +371,13 @@ kvasir_service_main() {
   TP_WRITE_SCOPE_IGNORE_PREFIXES=""
   TP_WRITE_SCOPE_IGNORED_PREFIXES=()
   TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV=""
+  TP_ENFORCE_WORKSPACE_WRITE_POLICY="true"
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES=()
+  TP_ALLOWED_SERVICE_ARTIFACT_PREFIXES_CSV=""
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES=()
+  TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES_CSV=""
+  TP_POLICY_REJECTED_OVERRIDES=()
+  TP_POLICY_REJECTED_OVERRIDES_CSV=""
 
   tp_init_result_state
 
@@ -464,6 +475,39 @@ kvasir_service_main() {
     resolved_write_scope_prefixes="$KVASIR_WRITE_SCOPE_IGNORE_PREFIXES"
   fi
 
+  case "$strict_write_scope_overrides" in
+    true|false) ;;
+    *)
+      kvasir_service_apply_failure "invalid-service-config" "invalid_config"
+      if ! kvasir_service_write_reports_or_fail; then
+        return 1
+      fi
+      return 1
+      ;;
+  esac
+
+  case "$allow_write_scope_overrides" in
+    true|false) ;;
+    *)
+      kvasir_service_apply_failure "invalid-service-config" "invalid_config"
+      if ! kvasir_service_write_reports_or_fail; then
+        return 1
+      fi
+      return 1
+      ;;
+  esac
+
+  if [[ "$strict_write_scope_overrides" == "true" && "$allow_write_scope_overrides" != "true" ]]; then
+    if [[ -n "$manifest_write_scope_prefixes" || "${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES+x}" == "x" ]]; then
+      TP_POLICY_REJECTED_OVERRIDES_CSV="${manifest_write_scope_prefixes}:${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES:-}"
+      kvasir_service_apply_failure "invalid-service-config" "policy_override_rejected"
+      if ! kvasir_service_write_reports_or_fail; then
+        return 1
+      fi
+      return 1
+    fi
+  fi
+
   if [[ -z "$resolved_original_repo" || -z "$resolved_generated_repo" || -z "$resolved_adapter" ]]; then
     kvasir_service_apply_failure "invalid-service-config" "invalid_config"
     if ! kvasir_service_write_reports_or_fail; then
@@ -557,7 +601,7 @@ kvasir_service_main() {
   fi
 
   TP_WRITE_SCOPE_IGNORE_PREFIXES="$resolved_write_scope_prefixes"
-  if ! tp_resolve_write_scope_ignored_prefixes; then
+  if ! tp_resolve_write_scope_policy_classes; then
     kvasir_service_apply_failure "invalid-service-config" "invalid_config"
     if ! kvasir_service_write_reports_or_fail; then
       return 1

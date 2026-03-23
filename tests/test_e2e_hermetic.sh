@@ -35,6 +35,11 @@ case "$scenario" in
   undocumented-removal)
     rm -f src/test/java/OriginalFixtureTest.java
     ;;
+  invalid-removal-reason)
+    mkdir -p completion/proof/logs
+    rm -f src/test/java/OriginalFixtureTest.java
+    printf './src/test/java/OriginalFixtureTest.java\tunknown\tna\n' > completion/proof/logs/test-port-removed-tests.tsv
+    ;;
   maximize-retention)
     mkdir -p completion/proof/logs src/test/java
     if [[ "$call_no" -eq 1 ]]; then
@@ -352,15 +357,40 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
 if obj.get("status") != "failed":
     raise SystemExit(f"expected failed status, got {obj.get('status')}")
-if obj.get("reason") != "insufficient-test-evidence":
-    raise SystemExit(f"expected insufficient-test-evidence reason, got {obj.get('reason')}")
-if obj.get("failure_class") != "undocumented-test-removal":
-    raise SystemExit(f"expected undocumented-test-removal, got {obj.get('failure_class')}")
+if obj.get("reason") != "retention-policy-violation":
+  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('reason')}")
+if obj.get("failure_class") != "invalid-removal-documentation":
+  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('failure_class')}")
 removed = obj.get("removed_original_tests", [])
 if not removed or removed[0].get("documented") is not False:
     raise SystemExit(f"expected undocumented removed tests, got {removed}")
 if obj.get("retention_policy", {}).get("undocumented_removed_test_count", 0) < 1:
     raise SystemExit("expected undocumented removed test count >= 1")
+PY
+}
+
+case_invalid_reason_code_fails_retention_policy() {
+  local tmp json_path
+  tmp="$(tpt_mktemp_dir)"
+
+  setup_fake_tools "$tmp"
+  IFS=$'\t' read -r json_path _ < <(run_test_port_case "invalid-removal-reason" "$tmp")
+
+  python3 - <<'PY' "$json_path"
+import json, sys
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+  obj = json.load(f)
+if obj.get("status") != "failed":
+  raise SystemExit(f"expected failed status, got {obj.get('status')}")
+if obj.get("reason") != "retention-policy-violation":
+  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('reason')}")
+if obj.get("failure_class") != "invalid-removal-documentation":
+  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('failure_class')}")
+removed = obj.get("removed_original_tests", [])
+if not removed:
+  raise SystemExit("expected removed test entries")
+if removed[0].get("documented") is not False:
+  raise SystemExit(f"expected invalid documentation flag, got {removed[0]}")
 PY
 }
 
@@ -423,6 +453,7 @@ tpt_run_case "ignored runtime writes do not fail write-scope" case_ignored_runti
 tpt_run_case "disallowed source writes fail write-scope" case_disallowed_source_write_fails
 tpt_run_case "zero junit reports emit no-test-signal" case_zero_junit_reports_emits_no_signal
 tpt_run_case "undocumented removed test fails evidence guard" case_undocumented_removed_test_fails_evidence_guard
+tpt_run_case "invalid reason code fails retention policy" case_invalid_reason_code_fails_retention_policy
 tpt_run_case "retention maximization selects best iteration" case_retention_maximization_selects_best_iteration
 tpt_run_case "verdict prefers junit evidence over compatibility classifier" case_verdict_prefers_junit_evidence_over_compatibility_class
 tpt_run_case "claude adapter path executes successfully" case_claude_adapter_path_passes
