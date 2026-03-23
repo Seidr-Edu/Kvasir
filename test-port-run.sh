@@ -17,6 +17,7 @@ fi
 source "${TOOLS_DIR}/scripts/lib/tp_common.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_cli.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_runner.sh"
+source "${TOOLS_DIR}/scripts/lib/tp_build_env.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_write_guard.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_copy.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_evidence.sh"
@@ -101,6 +102,12 @@ tp_init_result_state() {
   TP_PORTED_ORIGINAL_TESTS_ERRORS=0
   TP_PORTED_ORIGINAL_TESTS_SKIPPED=0
   TP_PORTED_ORIGINAL_JUNIT_REPORTS_FOUND=0
+  TP_GENERATED_BASELINE_SUCCESSFUL_JDK=""
+  TP_PORTED_LAST_SUCCESSFUL_JDK=""
+
+  tp_build_env_reset_suite_state "TP_BASELINE_ORIGINAL"
+  tp_build_env_reset_suite_state "TP_BASELINE_GENERATED"
+  tp_build_env_reset_suite_state "TP_PORTED_ORIGINAL"
 
   TP_GENERATED_REPO_BEFORE_HASH=""
   TP_GENERATED_REPO_AFTER_HASH=""
@@ -315,7 +322,7 @@ tp_execute() {
   TP_WORKSPACE_PREPARED=true
 
   set +e
-  tp_run_baseline_tests "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG"
+  tp_run_baseline_tests_with_build_env "TP_BASELINE_ORIGINAL" "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG"
   TP_BASELINE_ORIGINAL_RC=$?
   tp_collect_execution_summary "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG" "TP_BASELINE_ORIGINAL"
   TP_BASELINE_ORIGINAL_STATUS="$TP_BASELINE_LAST_STATUS"
@@ -344,7 +351,7 @@ tp_execute() {
   tp_configure_generated_effective_roots
 
   set +e
-  tp_run_baseline_tests "$TP_GENERATED_BASELINE_EFFECTIVE_REPO" "$TP_BASELINE_GENERATED_LOG"
+  tp_run_baseline_tests_with_build_env "TP_BASELINE_GENERATED" "$TP_GENERATED_BASELINE_EFFECTIVE_REPO" "$TP_BASELINE_GENERATED_LOG"
   TP_BASELINE_GENERATED_RC=$?
   tp_collect_execution_summary "$TP_GENERATED_BASELINE_EFFECTIVE_REPO" "$TP_BASELINE_GENERATED_LOG" "TP_BASELINE_GENERATED"
   TP_BASELINE_GENERATED_STATUS="$TP_BASELINE_LAST_STATUS"
@@ -422,7 +429,7 @@ tp_execute() {
 
     local adapt_log="${TP_LOG_DIR}/adapt-iter-${i}.log"
     TP_PORTED_ORIGINAL_TESTS_LOG="$adapt_log"
-    if tp_run_tests "$TP_PORTED_EFFECTIVE_REPO" "$adapt_log"; then
+    if tp_run_tests_with_build_env "TP_PORTED_ORIGINAL" "$TP_PORTED_EFFECTIVE_REPO" "$adapt_log"; then
       TP_PORTED_ORIGINAL_TESTS_EXIT_CODE=0
       TP_PORTED_ORIGINAL_TESTS_STATUS="pass"
       TP_ITERATIONS_USED="$i"
@@ -526,6 +533,7 @@ main() {
   tp_adapter_validate_supported "$TP_ADAPTER"
   tp_init_result_state
   mkdir -p "$TP_LOG_DIR" "$TP_OUTPUT_DIR" "$TP_TMP_DIR"
+  tp_build_env_prepare_runtime_toolcache
   export TMPDIR="$TP_TMP_DIR"
 
   # Codex adapter requires a diagram path to derive a readable context dir. When no
