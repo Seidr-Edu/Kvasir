@@ -11,10 +11,11 @@ source "${SCRIPT_DIR}/lib/testlib.sh"
 source "${SCRIPT_DIR}/lib/service_testlib.sh"
 
 case_container_contract_emits_report() {
-  local tmp original_repo generated_repo provider_bin provider_seed run_dir image_tag build_log run_log rc
+  local tmp original_repo generated_repo provider_bin provider_seed run_dir image_tag build_log run_log jdk_log rc
   tmp="$(tpt_mktemp_dir)"
   build_log="${tmp}/docker-build.log"
   run_log="${tmp}/docker-run.log"
+  jdk_log="${tmp}/docker-jdks.log"
 
   if ! command -v docker >/dev/null 2>&1; then
     tpt_log "skipping container integration test: docker not installed"
@@ -69,8 +70,18 @@ case_container_contract_emits_report() {
     return 1
   fi
 
+  if ! docker run --rm --entrypoint bash "$image_tag" -lc 'source /app/scripts/lib/tp_build_env.sh && tp_build_env_list_available_jdks' >"$jdk_log" 2>&1; then
+    cat "$jdk_log" >&2
+    return 1
+  fi
+
   tpt_assert_file_exists "${run_dir}/outputs/test_port.json" "container contract must emit test_port.json"
   tpt_assert_file_exists "${run_dir}/provider-state/codex-home/sessions/auth-state.json" "container contract should copy provider seed into runtime CODEX_HOME"
+  tpt_assert_file_contains "$jdk_log" "25" "container image should include JDK 25"
+  tpt_assert_file_contains "$jdk_log" "21" "container image should include JDK 21"
+  tpt_assert_file_contains "$jdk_log" "17" "container image should include JDK 17"
+  tpt_assert_file_contains "$jdk_log" "11" "container image should include JDK 11"
+  tpt_assert_file_contains "$jdk_log" "8" "container image should include JDK 8"
 }
 
 tpt_run_case "container contract emits json report" case_container_contract_emits_report

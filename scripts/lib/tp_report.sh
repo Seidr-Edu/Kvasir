@@ -7,6 +7,9 @@ tp_write_reports() {
   local finished
   finished="$(tp_timestamp_iso_utc)"
 
+  TP_REPORT_BASELINE_ORIGINAL_BUILD_ENV_JSON="$(tp_build_env_suite_report_json "TP_BASELINE_ORIGINAL")" \
+  TP_REPORT_BASELINE_GENERATED_BUILD_ENV_JSON="$(tp_build_env_suite_report_json "TP_BASELINE_GENERATED")" \
+  TP_REPORT_PORTED_ORIGINAL_BUILD_ENV_JSON="$(tp_build_env_suite_report_json "TP_PORTED_ORIGINAL")" \
   python3 - <<'PY' \
     "$TP_JSON_PATH" "$TP_SUMMARY_MD_PATH" "$TP_RUN_ID" "$TP_STARTED_AT" "$finished" \
     "$TP_GENERATED_REPO" "$TP_ORIGINAL_REPO" "$TP_ORIGINAL_SUBDIR" "${TP_GENERATED_EFFECTIVE_SUBDIR:-}" "$TP_ORIGINAL_EFFECTIVE_PATH" "${TP_GENERATED_EFFECTIVE_PATH:-$TP_GENERATED_REPO}" "$TP_DIAGRAM_PATH" \
@@ -84,6 +87,16 @@ def to_float(v):
 
 def to_bool(v):
     return str(v).lower() == "true"
+
+
+def env_json(name, default):
+    raw = os.environ.get(name, "")
+    if not raw:
+        return default
+    try:
+        return json.loads(raw)
+    except Exception:
+        return default
 
 
 def split_csv(value):
@@ -327,6 +340,7 @@ obj = {
         "status": baseline_orig_status,
         "exit_code": to_int(baseline_orig_rc, -1),
         "log_path": baseline_orig_log,
+        "build_environment": env_json("TP_REPORT_BASELINE_ORIGINAL_BUILD_ENV_JSON", {}),
         "strategy": baseline_orig_strategy,
         "unit_only_exit_code": to_int(baseline_orig_unit_rc, -1),
         "full_fallback_exit_code": to_int(baseline_orig_full_rc, -1),
@@ -351,6 +365,7 @@ obj = {
         "status": baseline_gen_status,
         "exit_code": to_int(baseline_gen_rc, -1),
         "log_path": baseline_gen_log,
+        "build_environment": env_json("TP_REPORT_BASELINE_GENERATED_BUILD_ENV_JSON", {}),
         "strategy": baseline_gen_strategy,
         "unit_only_exit_code": to_int(baseline_gen_unit_rc, -1),
         "full_fallback_exit_code": to_int(baseline_gen_full_rc, -1),
@@ -377,6 +392,7 @@ obj = {
         "iterations_used": to_int(iterations_used, 0),
         "adapter_nonzero_runs": to_int(adapter_nonzero_runs, 0),
         "log_path": ported_log,
+        "build_environment": env_json("TP_REPORT_PORTED_ORIGINAL_BUILD_ENV_JSON", {}),
         "execution_summary": execution_summary(
             ported_tests_discovered,
             ported_tests_executed,
@@ -474,10 +490,13 @@ summary_lines = [
     f"- Iterations used: **{obj['ported_original_tests']['iterations_used']}**",
     f"- Adapter non-zero runs: **{obj['ported_original_tests']['adapter_nonzero_runs']}**",
     f"- Baseline original tests: **{obj['baseline_original_tests']['status']}** (exit {obj['baseline_original_tests']['exit_code']}, strategy {obj['baseline_original_tests'].get('strategy') or '<none>'}, failure type {obj['baseline_original_tests'].get('failure_type') or '<none>'}) log: {obj['baseline_original_tests']['log_path'] or '<none>'}",
+    f"- Baseline original build env: runner={obj['baseline_original_tests']['build_environment'].get('detected_runner') or '<none>'}, tool={obj['baseline_original_tests']['build_environment'].get('build_tool') or '<none>'}, java_hint={obj['baseline_original_tests']['build_environment'].get('java_version_hint') or '<none>'}, selected_jdk={obj['baseline_original_tests']['build_environment'].get('selected_jdk') or '<none>'}, attempted_jdks={', '.join(obj['baseline_original_tests']['build_environment'].get('attempted_jdks', [])) or '<none>'}",
     f"- Baseline original execution summary: discovered={obj['baseline_original_tests']['execution_summary']['tests_discovered']}, executed={obj['baseline_original_tests']['execution_summary']['tests_executed']}, failed={obj['baseline_original_tests']['execution_summary']['tests_failed']}, errors={obj['baseline_original_tests']['execution_summary']['tests_errors']}, skipped={obj['baseline_original_tests']['execution_summary']['tests_skipped']}, reports={obj['baseline_original_tests']['execution_summary']['junit_reports_found']}",
     f"- Baseline generated tests: **{obj['baseline_generated_tests']['status']}** (exit {obj['baseline_generated_tests']['exit_code']}, strategy {obj['baseline_generated_tests'].get('strategy') or '<none>'}, failure type {obj['baseline_generated_tests'].get('failure_type') or '<none>'}) log: {obj['baseline_generated_tests']['log_path'] or '<none>'}",
+    f"- Baseline generated build env: runner={obj['baseline_generated_tests']['build_environment'].get('detected_runner') or '<none>'}, tool={obj['baseline_generated_tests']['build_environment'].get('build_tool') or '<none>'}, java_hint={obj['baseline_generated_tests']['build_environment'].get('java_version_hint') or '<none>'}, selected_jdk={obj['baseline_generated_tests']['build_environment'].get('selected_jdk') or '<none>'}, attempted_jdks={', '.join(obj['baseline_generated_tests']['build_environment'].get('attempted_jdks', [])) or '<none>'}",
     f"- Baseline generated execution summary: discovered={obj['baseline_generated_tests']['execution_summary']['tests_discovered']}, executed={obj['baseline_generated_tests']['execution_summary']['tests_executed']}, failed={obj['baseline_generated_tests']['execution_summary']['tests_failed']}, errors={obj['baseline_generated_tests']['execution_summary']['tests_errors']}, skipped={obj['baseline_generated_tests']['execution_summary']['tests_skipped']}, reports={obj['baseline_generated_tests']['execution_summary']['junit_reports_found']}",
     f"- Ported original tests: **{obj['ported_original_tests']['status']}** (exit {obj['ported_original_tests']['exit_code']}) log: {obj['ported_original_tests']['log_path'] or '<none>'}",
+    f"- Ported build env: runner={obj['ported_original_tests']['build_environment'].get('detected_runner') or '<none>'}, tool={obj['ported_original_tests']['build_environment'].get('build_tool') or '<none>'}, java_hint={obj['ported_original_tests']['build_environment'].get('java_version_hint') or '<none>'}, selected_jdk={obj['ported_original_tests']['build_environment'].get('selected_jdk') or '<none>'}, attempted_jdks={', '.join(obj['ported_original_tests']['build_environment'].get('attempted_jdks', [])) or '<none>'}",
     f"- Ported execution summary: discovered={obj['ported_original_tests']['execution_summary']['tests_discovered']}, executed={obj['ported_original_tests']['execution_summary']['tests_executed']}, failed={obj['ported_original_tests']['execution_summary']['tests_failed']}, errors={obj['ported_original_tests']['execution_summary']['tests_errors']}, skipped={obj['ported_original_tests']['execution_summary']['tests_skipped']}, reports={obj['ported_original_tests']['execution_summary']['junit_reports_found']}",
     "- Detailed failing cases are in `test_port.json` under `behavioral_evidence.grouped_failing_cases`.",
 ]

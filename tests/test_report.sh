@@ -10,6 +10,8 @@ source "${SCRIPT_DIR}/lib/testlib.sh"
 # shellcheck source=/dev/null
 source "${TOOL_ROOT}/scripts/lib/tp_common.sh"
 # shellcheck source=/dev/null
+source "${TOOL_ROOT}/scripts/lib/tp_build_env.sh"
+# shellcheck source=/dev/null
 source "${TOOL_ROOT}/scripts/lib/tp_report.sh"
 
 case_report_emits_ignored_prefixes() {
@@ -77,6 +79,26 @@ case_report_emits_ignored_prefixes() {
   TP_OUTPUT_DIR="${tmp}/outputs"
   TP_PORTED_REPO="${tmp}/workspace/ported-tests-repo"
   TP_ORIGINAL_TESTS_SNAPSHOT="${tmp}/workspace/original-tests-snapshot"
+
+  tp_build_env_reset_suite_state "TP_BASELINE_ORIGINAL"
+  tp_build_env_suite_set "TP_BASELINE_ORIGINAL" "DETECTED_RUNNER" "maven"
+  tp_build_env_suite_set "TP_BASELINE_ORIGINAL" "BUILD_TOOL" "maven"
+  tp_build_env_suite_set "TP_BASELINE_ORIGINAL" "JAVA_VERSION_HINT" "17"
+  tp_build_env_suite_set "TP_BASELINE_ORIGINAL" "SELECTED_JDK" "17"
+  tp_build_env_suite_set "TP_BASELINE_ORIGINAL" "ATTEMPTED_JDKS_CSV" "17"
+  tp_build_env_reset_suite_state "TP_BASELINE_GENERATED"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "DETECTED_RUNNER" "maven"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "BUILD_TOOL" "maven"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "JAVA_VERSION_HINT" "11"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "SELECTED_JDK" "17"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "ATTEMPTED_JDKS_CSV" "11:17"
+  tp_build_env_suite_set "TP_BASELINE_GENERATED" "HINT_SOURCE" "lidskjalv-generated"
+  tp_build_env_reset_suite_state "TP_PORTED_ORIGINAL"
+  tp_build_env_suite_set "TP_PORTED_ORIGINAL" "DETECTED_RUNNER" "maven"
+  tp_build_env_suite_set "TP_PORTED_ORIGINAL" "BUILD_TOOL" "maven"
+  tp_build_env_suite_set "TP_PORTED_ORIGINAL" "JAVA_VERSION_HINT" "11"
+  tp_build_env_suite_set "TP_PORTED_ORIGINAL" "SELECTED_JDK" "17"
+  tp_build_env_suite_set "TP_PORTED_ORIGINAL" "ATTEMPTED_JDKS_CSV" "17"
 
   mkdir -p "${tmp}/outputs" "${tmp}/workspace/ported-tests-repo/src/test/java" "${tmp}/workspace/original-tests-snapshot/src/test/java"
   echo "digest" > "$TP_GENERATED_BEFORE_HASH_PATH"
@@ -154,12 +176,22 @@ if baseline.get("strategy") != "maven-unit-first-fallback-full":
     raise SystemExit(f"unexpected baseline strategy: {baseline}")
 if baseline.get("unit_only_exit_code") != 0:
     raise SystemExit(f"unexpected baseline unit-only rc: {baseline}")
+build_env = baseline.get("build_environment", {})
+if build_env.get("selected_jdk") != "17":
+    raise SystemExit(f"unexpected baseline selected_jdk: {build_env}")
+generated_env = obj.get("baseline_generated_tests", {}).get("build_environment", {})
+if generated_env.get("attempted_jdks") != ["11", "17"]:
+    raise SystemExit(f"unexpected generated attempted_jdks: {generated_env}")
+if generated_env.get("hint", {}).get("source") != "lidskjalv-generated":
+    raise SystemExit(f"unexpected generated hint source: {generated_env}")
 PY
 
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Write-scope ignored prefixes" "summary should mention ignored prefixes"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "./completion/proof/logs/" "summary should include resolved ignored prefixes"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Retention policy" "summary should mention retention policy"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Removed original tests" "summary should include removed-test count"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Baseline generated build env" "summary should include generated build environment"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "selected_jdk=17" "summary should include selected JDK details"
 }
 
 tpt_run_case "report includes ignored prefixes in json and summary" case_report_emits_ignored_prefixes

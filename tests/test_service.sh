@@ -244,6 +244,68 @@ if obj.get("inputs", {}).get("adapter") != "codex":
 PY
 }
 
+case_build_hints_select_subdir_and_surface_hint_metadata() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  original_repo="${tmp}/original-monorepo"
+  generated_repo="${tmp}/generated-monorepo"
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+
+  mkdir -p "${original_repo}/app/src/test/java" "${generated_repo}/app/src/main/java"
+  cp "${SCRIPT_DIR}/fixtures/original_repo/pom.xml" "${original_repo}/app/pom.xml"
+  cp "${SCRIPT_DIR}/fixtures/generated_repo/pom.xml" "${generated_repo}/app/pom.xml"
+  cp "${SCRIPT_DIR}/fixtures/original_repo/src/test/java/OriginalFixtureTest.java" "${original_repo}/app/src/test/java/OriginalFixtureTest.java"
+  cp "${SCRIPT_DIR}/fixtures/generated_repo/src/main/java/Prod.java" "${generated_repo}/app/src/main/java/Prod.java"
+  mkdir -p "${run_dir}/config"
+  cat > "${run_dir}/config/build-hints.json" <<'JSON'
+{
+  "original": {
+    "build_tool": "maven",
+    "build_subdir": "app",
+    "java_version_hint": "17",
+    "source": "lidskjalv-original"
+  },
+  "generated": {
+    "build_tool": "maven",
+    "build_subdir": "app",
+    "java_version_hint": "17",
+    "source": "lidskjalv-generated"
+  }
+}
+JSON
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex")"
+
+  tpt_assert_eq "0" "$rc" "build hints should let service run against hinted module subdirs"
+  tpt_assert_file_exists "$json_path" "hint-driven service run must emit json report"
+  python3 - <<'PY' "$json_path"
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    obj = json.load(f)
+
+if obj.get("inputs", {}).get("original_subdir") != "app":
+    raise SystemExit(f"expected original_subdir from hints, got {obj.get('inputs', {}).get('original_subdir')!r}")
+if obj.get("inputs", {}).get("generated_subdir") != "app":
+    raise SystemExit(f"expected generated_subdir from hints, got {obj.get('inputs', {}).get('generated_subdir')!r}")
+baseline_original = obj.get("baseline_original_tests", {}).get("build_environment", {})
+baseline_generated = obj.get("baseline_generated_tests", {}).get("build_environment", {})
+if baseline_original.get("hint", {}).get("source") != "lidskjalv-original":
+    raise SystemExit(f"expected original hint source, got {baseline_original!r}")
+if baseline_generated.get("hint", {}).get("source") != "lidskjalv-generated":
+    raise SystemExit(f"expected generated hint source, got {baseline_generated!r}")
+PY
+}
+
 case_invalid_manifest_still_emits_report() {
   local tmp run_dir log_path json_path manifest_path rc
   tmp="$(tpt_mktemp_dir)"
@@ -483,6 +545,7 @@ tpt_run_case "codex exec uses container-safe flags" case_codex_exec_uses_contain
 tpt_run_case "manifest-driven service startup passes" case_manifest_driven_startup_passes
 tpt_run_case "strict mode rejects write-scope overrides" case_manifest_override_rejected_in_strict_mode
 tpt_run_case "env overrides manifest values" case_env_overrides_manifest_values
+tpt_run_case "build hints select subdir and surface hint metadata" case_build_hints_select_subdir_and_surface_hint_metadata
 tpt_run_case "invalid manifest still emits report" case_invalid_manifest_still_emits_report
 tpt_run_case "unknown manifest key still emits report" case_unknown_manifest_key_still_emits_report
 tpt_run_case "missing adapter still emits report" case_missing_adapter_still_emits_report

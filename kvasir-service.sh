@@ -246,6 +246,82 @@ for key, value in assignments.items():
 PY
 }
 
+kvasir_service_load_build_hints() {
+  local hints_path="$1"
+  python3 - <<'PY' "$hints_path"
+import json
+import shlex
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+except FileNotFoundError:
+    raise SystemExit(0)
+except Exception as exc:
+    print(f"invalid build hints: {exc}", file=sys.stderr)
+    raise SystemExit(1)
+
+if not isinstance(data, dict):
+    print("invalid build hints: root must be an object", file=sys.stderr)
+    raise SystemExit(1)
+
+allowed_sections = {"original", "generated"}
+allowed_fields = {
+    "build_tool",
+    "build_jdk",
+    "java_version_hint",
+    "build_subdir",
+    "source",
+}
+
+unknown_sections = sorted(set(data.keys()) - allowed_sections)
+if unknown_sections:
+    print(f"invalid build hints: unknown sections: {', '.join(unknown_sections)}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def section_assignments(name):
+    section = data.get(name)
+    if section is None:
+        return {}
+    if not isinstance(section, dict):
+        print(f"invalid build hints: section {name!r} must be an object", file=sys.stderr)
+        raise SystemExit(1)
+    unknown = sorted(set(section.keys()) - allowed_fields)
+    if unknown:
+        print(
+            f"invalid build hints: section {name!r} has unknown fields: {', '.join(unknown)}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    result = {}
+    for field in sorted(allowed_fields):
+        value = section.get(field)
+        if value is None:
+            result[field] = ""
+            continue
+        if not isinstance(value, str):
+            print(
+                f"invalid build hints: field {name}.{field} must be a string",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        result[field] = value
+    return result
+
+
+for section_name in ("original", "generated"):
+    assignments = section_assignments(section_name)
+    section_prefix = f"KVASIR_SERVICE_HINT_{section_name.upper()}"
+    for field_name, value in assignments.items():
+        env_name = f"{section_prefix}_{field_name.upper()}"
+        print(f"{env_name}={shlex.quote(value)}")
+PY
+}
+
 kvasir_service_prepare_output_dir() {
   local probe
   mkdir -p "$TP_OUTPUT_DIR" >/dev/null 2>&1 || return 1
@@ -341,6 +417,7 @@ kvasir_service_main() {
   local manifest_write_scope_prefixes=""
   local resolved_original_repo="/input/original-repo"
   local resolved_generated_repo="/input/generated-repo"
+  local build_hints_path=""
   local resolved_adapter=""
   local resolved_original_subdir=""
   local resolved_generated_subdir=""
@@ -378,6 +455,16 @@ kvasir_service_main() {
   TP_IMMUTABLE_OR_DENIED_TARGET_PREFIXES_CSV=""
   TP_POLICY_REJECTED_OVERRIDES=()
   TP_POLICY_REJECTED_OVERRIDES_CSV=""
+  TP_HINT_ORIGINAL_BUILD_TOOL=""
+  TP_HINT_ORIGINAL_BUILD_JDK=""
+  TP_HINT_ORIGINAL_JAVA_VERSION_HINT=""
+  TP_HINT_ORIGINAL_BUILD_SUBDIR=""
+  TP_HINT_ORIGINAL_SOURCE=""
+  TP_HINT_GENERATED_BUILD_TOOL=""
+  TP_HINT_GENERATED_BUILD_JDK=""
+  TP_HINT_GENERATED_JAVA_VERSION_HINT=""
+  TP_HINT_GENERATED_BUILD_SUBDIR=""
+  TP_HINT_GENERATED_SOURCE=""
 
   tp_init_result_state
 
@@ -392,6 +479,7 @@ kvasir_service_main() {
       manifest_path="$default_manifest_path"
     fi
   fi
+  build_hints_path="${KVASIR_BUILD_HINTS:-${TP_RUN_DIR}/config/build-hints.json}"
 
   if [[ -f "/input/model/diagram.puml" ]]; then
     default_diagram="/input/model/diagram.puml"
@@ -415,6 +503,29 @@ kvasir_service_main() {
     manifest_diagram_relpath="${KVASIR_SERVICE_MANIFEST_DIAGRAM_RELPATH:-}"
     manifest_max_iter="${KVASIR_SERVICE_MANIFEST_MAX_ITER:-}"
     manifest_write_scope_prefixes="${KVASIR_SERVICE_MANIFEST_WRITE_SCOPE_IGNORE_PREFIXES:-}"
+  fi
+
+  if [[ -f "$build_hints_path" ]]; then
+    local build_hint_assignments
+    build_hints_path="$(tp_abs_path "$build_hints_path")"
+    if ! build_hint_assignments="$(kvasir_service_load_build_hints "$build_hints_path")"; then
+      kvasir_service_apply_failure "invalid-service-config" "invalid_config"
+      if ! kvasir_service_write_reports_or_fail; then
+        return 1
+      fi
+      return 1
+    fi
+    eval "$build_hint_assignments"
+    TP_HINT_ORIGINAL_BUILD_TOOL="${KVASIR_SERVICE_HINT_ORIGINAL_BUILD_TOOL:-}"
+    TP_HINT_ORIGINAL_BUILD_JDK="${KVASIR_SERVICE_HINT_ORIGINAL_BUILD_JDK:-}"
+    TP_HINT_ORIGINAL_JAVA_VERSION_HINT="${KVASIR_SERVICE_HINT_ORIGINAL_JAVA_VERSION_HINT:-}"
+    TP_HINT_ORIGINAL_BUILD_SUBDIR="${KVASIR_SERVICE_HINT_ORIGINAL_BUILD_SUBDIR:-}"
+    TP_HINT_ORIGINAL_SOURCE="${KVASIR_SERVICE_HINT_ORIGINAL_SOURCE:-}"
+    TP_HINT_GENERATED_BUILD_TOOL="${KVASIR_SERVICE_HINT_GENERATED_BUILD_TOOL:-}"
+    TP_HINT_GENERATED_BUILD_JDK="${KVASIR_SERVICE_HINT_GENERATED_BUILD_JDK:-}"
+    TP_HINT_GENERATED_JAVA_VERSION_HINT="${KVASIR_SERVICE_HINT_GENERATED_JAVA_VERSION_HINT:-}"
+    TP_HINT_GENERATED_BUILD_SUBDIR="${KVASIR_SERVICE_HINT_GENERATED_BUILD_SUBDIR:-}"
+    TP_HINT_GENERATED_SOURCE="${KVASIR_SERVICE_HINT_GENERATED_SOURCE:-}"
   fi
 
   if [[ -n "$manifest_run_id" ]]; then
@@ -473,6 +584,13 @@ kvasir_service_main() {
   fi
   if [[ "${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES+x}" == "x" ]]; then
     resolved_write_scope_prefixes="$KVASIR_WRITE_SCOPE_IGNORE_PREFIXES"
+  fi
+
+  if [[ -z "$resolved_original_subdir" && -n "${TP_HINT_ORIGINAL_BUILD_SUBDIR:-}" ]]; then
+    resolved_original_subdir="$TP_HINT_ORIGINAL_BUILD_SUBDIR"
+  fi
+  if [[ -z "$resolved_generated_subdir" && -n "${TP_HINT_GENERATED_BUILD_SUBDIR:-}" ]]; then
+    resolved_generated_subdir="$TP_HINT_GENERATED_BUILD_SUBDIR"
   fi
 
   case "$strict_write_scope_overrides" in
@@ -632,6 +750,8 @@ kvasir_service_main() {
     fi
     return 1
   fi
+
+  tp_build_env_prepare_runtime_toolcache
 
   export TMPDIR="$TP_TMP_DIR"
 
