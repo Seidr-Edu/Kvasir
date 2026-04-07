@@ -183,10 +183,12 @@ case "${TPT_ADAPTER_SCENARIO:-}" in
     case "${PWD:-}" in
       *original-baseline-repo|*generated-baseline-repo)
         if [[ "$*" == *"-DskipITs"* ]]; then
-          echo "Connection refused"
-          exit 1
+          cat > target/surefire-reports/TEST-fake.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="ok"/></testsuite>
+XML
+          exit 0
         fi
-        echo "Non-resolvable parent POM"
+        echo "Connection refused"
         exit 1
         ;;
     esac
@@ -236,6 +238,11 @@ run_test_port_case() {
 
   local original_repo generated_repo run_dir json_path
   IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$root")
+  if [[ "$scenario" == "behavioral-evidence" ]]; then
+    cat > "${original_repo}/src/test/java/DatabaseIT.java" <<'JAVA'
+class DatabaseIT {}
+JAVA
+  fi
   run_dir="${root}/run"
   json_path="${run_dir}/outputs/test_port.json"
 
@@ -269,8 +276,8 @@ case_claude_adapter_path_passes() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "passed":
-    raise SystemExit(f"expected passed status, got {obj.get('status')}")
+if obj.get("result", {}).get("status") != "passed":
+    raise SystemExit(f"expected passed status, got {obj.get('result', {}).get('status')}")
 if obj.get("inputs", {}).get("adapter") != "claude":
     raise SystemExit(f"expected claude adapter in report, got {obj.get('inputs', {}).get('adapter')}")
 PY
@@ -287,11 +294,11 @@ case_ignored_runtime_writes_do_not_fail() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "passed":
-    raise SystemExit(f"expected passed status, got {obj.get('status')}")
-if obj.get("write_scope", {}).get("violation_count") != 0:
-    raise SystemExit(f"expected zero violations, got {obj.get('write_scope', {}).get('violation_count')}")
-ignored = obj.get("write_scope", {}).get("ignored_prefixes", [])
+if obj.get("result", {}).get("status") != "passed":
+    raise SystemExit(f"expected passed status, got {obj.get('result')}")
+if obj.get("diagnostics", {}).get("write_scope", {}).get("violation_count") != 0:
+    raise SystemExit(f"expected zero violations, got {obj.get('diagnostics', {}).get('write_scope', {}).get('violation_count')}")
+ignored = obj.get("diagnostics", {}).get("write_scope", {}).get("ignored_prefixes", [])
 for expected in ("./completion/proof/logs/", "./.mvn_repo/", "./.m2/"):
     if expected not in ignored:
         raise SystemExit(f"missing ignored prefix: {expected}")
@@ -315,11 +322,11 @@ case_disallowed_source_write_fails() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "failed":
-    raise SystemExit(f"expected failed status, got {obj.get('status')}")
-if obj.get("reason") != "write-scope-violation":
-    raise SystemExit(f"expected write-scope-violation reason, got {obj.get('reason')}")
-violations = obj.get("write_scope", {}).get("violations", [])
+if obj.get("result", {}).get("status") != "failed":
+    raise SystemExit(f"expected failed status, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "write-scope-violation":
+    raise SystemExit(f"expected write-scope-violation reason, got {obj.get('result')}")
+violations = obj.get("diagnostics", {}).get("write_scope", {}).get("violations", [])
 paths = [item.get("path", "") for item in violations]
 if "./src/main/java/Prod.java" not in paths:
     raise SystemExit(f"expected ./src/main/java/Prod.java violation, got {paths}")
@@ -337,14 +344,12 @@ case_zero_junit_reports_emits_no_signal() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "skipped":
-    raise SystemExit(f"expected skipped status, got {obj.get('status')}")
-if obj.get("reason") != "no-test-signal":
-    raise SystemExit(f"expected no-test-signal reason, got {obj.get('reason')}")
-if obj.get("status_detail") != "no_test_signal":
-    raise SystemExit(f"expected no_test_signal status_detail, got {obj.get('status_detail')}")
-if obj.get("behavioral_verdict") != "no_test_signal":
-    raise SystemExit(f"expected no_test_signal verdict, got {obj.get('behavioral_verdict')}")
+if obj.get("result", {}).get("status") != "skipped":
+    raise SystemExit(f"expected skipped status, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "no-portable-test-signal":
+    raise SystemExit(f"expected no-portable-test-signal reason, got {obj.get('result')}")
+if obj.get("result", {}).get("verdict") != "no_test_signal":
+    raise SystemExit(f"expected no_test_signal verdict, got {obj.get('result')}")
 PY
 }
 
@@ -359,16 +364,17 @@ case_undocumented_removed_test_fails_evidence_guard() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "failed":
-    raise SystemExit(f"expected failed status, got {obj.get('status')}")
-if obj.get("reason") != "retention-policy-violation":
-  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('reason')}")
-if obj.get("failure_class") != "invalid-removal-documentation":
-  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('failure_class')}")
-removed = obj.get("removed_original_tests", [])
+if obj.get("result", {}).get("status") != "failed":
+    raise SystemExit(f"expected failed status, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "retention-policy-violation":
+  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('result')}")
+if obj.get("result", {}).get("failure_class") != "invalid-removal-documentation":
+  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('result')}")
+retention = obj.get("evidence", {}).get("retention", {})
+removed = retention.get("removed_tests", [])
 if not removed or removed[0].get("documented") is not False:
     raise SystemExit(f"expected undocumented removed tests, got {removed}")
-if obj.get("retention_policy", {}).get("undocumented_removed_test_count", 0) < 1:
+if retention.get("undocumented_removed_test_count", 0) < 1:
     raise SystemExit("expected undocumented removed test count >= 1")
 PY
 }
@@ -384,13 +390,13 @@ case_invalid_reason_code_fails_retention_policy() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
   obj = json.load(f)
-if obj.get("status") != "failed":
-  raise SystemExit(f"expected failed status, got {obj.get('status')}")
-if obj.get("reason") != "retention-policy-violation":
-  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('reason')}")
-if obj.get("failure_class") != "invalid-removal-documentation":
-  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('failure_class')}")
-removed = obj.get("removed_original_tests", [])
+if obj.get("result", {}).get("status") != "failed":
+  raise SystemExit(f"expected failed status, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "retention-policy-violation":
+  raise SystemExit(f"expected retention-policy-violation reason, got {obj.get('result')}")
+if obj.get("result", {}).get("failure_class") != "invalid-removal-documentation":
+  raise SystemExit(f"expected invalid-removal-documentation, got {obj.get('result')}")
+removed = obj.get("evidence", {}).get("retention", {}).get("removed_tests", [])
 if not removed:
   raise SystemExit("expected removed test entries")
 if removed[0].get("documented") is not False:
@@ -409,12 +415,12 @@ case_retention_maximization_selects_best_iteration() {
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "passed":
-    raise SystemExit(f"expected passed status, got {obj.get('status')}")
-ported = obj.get("ported_original_tests", {})
+if obj.get("result", {}).get("status") != "passed":
+    raise SystemExit(f"expected passed status, got {obj.get('result')}")
+ported = obj.get("porting", {})
 if ported.get("iterations_used") != 1:
     raise SystemExit(f"expected best iteration 1, got {ported.get('iterations_used')}")
-shape = obj.get("suite_shape", {})
+shape = obj.get("evidence", {}).get("retention", {})
 if shape.get("removed_original_test_file_count") != 0:
     raise SystemExit(f"expected zero removed original tests, got {shape}")
 if shape.get("retained_original_test_file_count") != shape.get("original_snapshot_file_count"):
@@ -423,34 +429,45 @@ PY
 }
 
 case_verdict_prefers_junit_evidence_over_compatibility_class() {
-  local tmp json_path
+  local tmp json_path run_dir
   tmp="$(tpt_mktemp_dir)"
 
   setup_fake_tools "$tmp"
-  IFS=$'\t' read -r json_path _ < <(run_test_port_case "behavioral-evidence" "$tmp")
+  IFS=$'\t' read -r json_path run_dir < <(run_test_port_case "behavioral-evidence" "$tmp")
 
   python3 - <<'PY' "$json_path"
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
-if obj.get("status") != "failed":
-    raise SystemExit(f"expected failed status, got {obj.get('status')}")
-if obj.get("reason") != "tests-failed":
-    raise SystemExit(f"expected tests-failed reason, got {obj.get('reason')}")
-if obj.get("failure_class") != "compilation-failure":
-    raise SystemExit(f"expected compilation-failure classifier, got {obj.get('failure_class')}")
-if obj.get("behavioral_verdict") != "difference_detected":
-    raise SystemExit(f"expected difference_detected verdict, got {obj.get('behavioral_verdict')}")
-if obj.get("behavioral_evidence", {}).get("failing_case_count", 0) < 1:
+if obj.get("result", {}).get("status") != "failed":
+    raise SystemExit(f"expected failed status, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "tests-failed":
+    raise SystemExit(f"expected tests-failed reason, got {obj.get('result')}")
+if obj.get("result", {}).get("failure_class") != "compilation-failure":
+    raise SystemExit(f"expected compilation-failure classifier, got {obj.get('result')}")
+if obj.get("result", {}).get("verdict") != "difference_detected":
+    raise SystemExit(f"expected difference_detected verdict, got {obj.get('result')}")
+if obj.get("evidence", {}).get("behavioral", {}).get("failing_case_count", 0) < 1:
     raise SystemExit("expected junit failing_case_count >= 1")
-baseline = obj.get("baseline_original_tests", {})
-if baseline.get("status") != "fail-with-integration-skip":
-    raise SystemExit(f"expected baseline fail-with-integration-skip, got {baseline}")
-if baseline.get("failure_class") != "dependency-resolution-failure":
-    raise SystemExit(f"expected dependency-resolution-failure baseline class, got {baseline}")
-if baseline.get("failure_type") != "environmental-noise":
+baseline = obj.get("baselines", {}).get("original", {})
+if baseline.get("status") != "pass":
+    raise SystemExit(f"expected selected portable original baseline pass, got {baseline}")
+scope = obj.get("test_scope", {})
+if not scope.get("excluded_commands"):
+    raise SystemExit(f"expected environment-excluded scope command, got {scope}")
+if scope["excluded_commands"][0].get("failure_class") != "environment-assumption-failure":
+    raise SystemExit(f"expected environment-assumption-failure exclusion, got {scope}")
+excluded_tests = scope.get("excluded_tests", [])
+if not any(item.get("path") == "./src/test/java/DatabaseIT.java" for item in excluded_tests):
+    raise SystemExit(f"expected DatabaseIT.java to be excluded from narrow portable scope, got {scope}")
+if baseline.get("failure", {}).get("type") not in ("", None):
     raise SystemExit(f"expected baseline environmental-noise failure type, got {baseline}")
 PY
+
+  if [[ -e "${run_dir}/artifacts/ported-tests-repo/src/test/java/DatabaseIT.java" ]]; then
+    echo "ASSERT failed: environment-excluded test must not be ported" >&2
+    return 1
+  fi
 }
 
 tpt_run_case "ignored runtime writes do not fail write-scope" case_ignored_runtime_writes_do_not_fail

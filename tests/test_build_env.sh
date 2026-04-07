@@ -43,7 +43,18 @@ set -euo pipefail
 java_home_basename="$(basename "${JAVA_HOME:-missing}")"
 printf '%s\n' "$java_home_basename" >> "${TPT_BUILD_ENV_JDK_LOG}"
 
-case "${TPT_BUILD_ENV_MAVEN_MODE}" in
+  case "${TPT_BUILD_ENV_MAVEN_MODE}" in
+  portable-retry-on-toolchain)
+    if [[ "$java_home_basename" == "jdk11" ]]; then
+      printf '%s\n' "Unsupported class file major version 61"
+      exit 1
+    fi
+    mkdir -p target/surefire-reports
+    cat > target/surefire-reports/TEST-fake.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="ok"/></testsuite>
+XML
+    exit 0
+    ;;
   retry-on-toolchain)
     if [[ "$java_home_basename" == "jdk11" ]]; then
       printf '%s\n' "Unsupported class file major version 61"
@@ -184,6 +195,47 @@ case_baseline_retries_toolchain_failure_and_caches_generated_jdk() {
   tpt_assert_eq $'jdk11\njdk11\njdk17' "$attempts" "baseline should retry with the next compatible JDK after exhausting the first JDK's baseline strategy"
 }
 
+case_portable_scope_retries_toolchain_selection_failure() {
+  local tmp root repo log_file jdk_log rc attempts
+  tmp="$(tpt_mktemp_dir)"
+  root="${tmp}/runtime"
+  mkdir -p "$root"
+  make_fake_jdk "$root" 11 >/dev/null
+  make_fake_jdk "$root" 17 >/dev/null
+  repo="$(make_maven_repo "$tmp" 11)"
+  log_file="${tmp}/portable.log"
+  jdk_log="${tmp}/jdk-attempts.log"
+  : > "$jdk_log"
+
+  TP_BUILD_ENV_PLATFORM_OVERRIDE="Linux"
+  TP_BUILD_ENV_JDK_SEARCH_DIRS="$root"
+  TP_GENERATED_BASELINE_SUCCESSFUL_JDK=""
+  TP_RUN_DIR="$tmp/run"
+  TP_LOG_DIR="${tmp}/run/logs"
+  TP_SUMMARY_DIR="${tmp}/run/summary"
+  TP_TEST_SCOPE_JSON_PATH="${TP_SUMMARY_DIR}/test-scope.json"
+  TP_TEST_SCOPE_PROBES_FILE="${TP_SUMMARY_DIR}/test-scope-probes.jsonl"
+  TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-commands.tsv"
+  TP_TEST_SCOPE_EXCLUDED_TESTS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-tests.tsv"
+  mkdir -p "$TP_LOG_DIR" "$TP_SUMMARY_DIR"
+  export TPT_BUILD_ENV_JDK_LOG="$jdk_log"
+  make_fake_maven "$tmp" "portable-retry-on-toolchain"
+  tp_build_env_prepare_runtime_toolcache
+
+  set +e
+  tp_select_and_run_portable_scope_with_build_env "TP_BASELINE_ORIGINAL" "$repo" "$log_file"
+  rc=$?
+  set -e
+
+  tpt_assert_eq "0" "$rc" "portable scope selection should retry toolchain mismatch and recover"
+  tpt_assert_eq "selected" "$TP_TEST_SCOPE_STATUS" "portable scope should be selected after retry"
+  tpt_assert_eq "17" "$(tp_build_env_suite_get "TP_BASELINE_ORIGINAL" "SELECTED_JDK")" "suite metadata should record selected retry JDK"
+  tpt_assert_eq "11:17" "$(tp_build_env_suite_get "TP_BASELINE_ORIGINAL" "ATTEMPTED_JDKS_CSV")" "suite metadata should record portable retry order"
+
+  attempts="$(cat "$jdk_log")"
+  tpt_assert_eq $'jdk11\njdk17\njdk17' "$attempts" "portable scope should retry selection and rerun the selected scope on the winning JDK"
+}
+
 case_ported_prefers_generated_successful_jdk() {
   local tmp root repo log_file jdk_log rc attempts
   tmp="$(tpt_mktemp_dir)"
@@ -256,6 +308,7 @@ tpt_run_case "discover jdks uses override search dirs" case_discover_jdks_uses_o
 tpt_run_case "discover jdks tolerates unset home" case_discover_jdks_tolerates_unset_home
 tpt_run_case "discover jdks handles double quoted paths" case_discover_jdks_handles_double_quoted_paths
 tpt_run_case "baseline retries toolchain failure and caches generated jdk" case_baseline_retries_toolchain_failure_and_caches_generated_jdk
+tpt_run_case "portable scope retries toolchain selection failure" case_portable_scope_retries_toolchain_selection_failure
 tpt_run_case "ported prefers generated successful jdk" case_ported_prefers_generated_successful_jdk
 tpt_run_case "assertion failures do not retry across jdks" case_assertion_failures_do_not_retry_across_jdks
 

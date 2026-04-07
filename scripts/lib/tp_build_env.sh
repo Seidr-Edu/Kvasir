@@ -594,6 +594,55 @@ tp_run_baseline_tests_with_build_env() {
   return "$rc"
 }
 
+tp_select_and_run_portable_scope_with_build_env() {
+  local suite="$1"
+  local repo="$2"
+  local log_file="$3"
+  local -a candidates=()
+  local jdk=""
+  local rc=1
+  local attempt_no=0
+
+  tp_build_env_prepare_suite_state "$suite" "$repo"
+  while IFS= read -r jdk; do
+    [[ -n "$jdk" ]] && candidates+=("$jdk")
+  done < <(tp_build_env_candidate_jdks_for_suite "$suite")
+
+  if [[ ${#candidates[@]} -eq 0 ]]; then
+    tp_select_and_run_portable_scope "$repo" "$log_file"
+    return $?
+  fi
+
+  for jdk in "${candidates[@]}"; do
+    ((attempt_no+=1))
+    tp_build_env_suite_append_attempted_jdk "$suite" "$jdk"
+    if ! tp_build_env_select_jdk "$jdk"; then
+      continue
+    fi
+    tp_log "[$suite] portable-scope selection with JDK $jdk"
+    tp_select_and_run_portable_scope "$repo" "$log_file"
+    rc=$?
+    if [[ "$rc" -eq 0 ]]; then
+      tp_build_env_suite_set "$suite" "SELECTED_JDK" "$jdk"
+      return 0
+    fi
+    if [[ "$rc" -eq 2 ]]; then
+      if tp_build_env_should_retry_failure "${TP_TEST_SCOPE_FAILURE_CLASS:-unknown}" "${TP_TEST_SCOPE_FAILURE_LOG:-$log_file}" "$attempt_no" "${#candidates[@]}"; then
+        tp_warn "[$suite] retrying after toolchain-sensitive portable-scope selection failure on JDK $jdk"
+        continue
+      fi
+      return 2
+    fi
+    if tp_build_env_should_retry_failure "${TP_BASELINE_LAST_FAILURE_CLASS:-unknown}" "$log_file" "$attempt_no" "${#candidates[@]}"; then
+      tp_warn "[$suite] retrying after toolchain-sensitive portable-scope failure on JDK $jdk"
+      continue
+    fi
+    break
+  done
+
+  return "$rc"
+}
+
 tp_run_tests_with_build_env() {
   local suite="$1"
   local repo="$2"

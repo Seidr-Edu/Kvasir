@@ -105,7 +105,7 @@ tp_is_allowed_test_path() {
 
   # Backward compatibility fallback.
   case "$rel" in
-    ./src/test/*|./src/*Test*/*|./test/*|./tests/*) return 0 ;;
+    ./src/test/*|./src/*Test*/*|./src/*IT*/*|./src/*Integration*/*|./src/*Functional*/*|./src/*E2E*/*|./src/it/*|./src/integration/*|./src/functional/*|./src/e2e/*|./test/*|./tests/*) return 0 ;;
   esac
   return 1
 }
@@ -158,7 +158,7 @@ tp_apply_workspace_write_policy() {
     fi
   done
 
-  for abs in "$repo/src/test" "$repo/test" "$repo/tests"; do
+  for abs in "$repo/src/test" "$repo/src/it" "$repo/src/integration" "$repo/src/functional" "$repo/src/e2e" "$repo/test" "$repo/tests"; do
     [[ -e "$abs" ]] || continue
     chmod -R u+w "$abs" 2>/dev/null || true
   done
@@ -167,7 +167,7 @@ tp_apply_workspace_write_policy() {
     while IFS= read -r abs; do
       [[ -n "$abs" ]] || continue
       chmod -R u+w "$abs" 2>/dev/null || true
-    done < <(find "$repo/src" -type d -name '*Test*' -print 2>/dev/null)
+    done < <(find "$repo/src" -type d \( -name '*Test*' -o -name '*IT*' -o -name '*Integration*' -o -name '*Functional*' -o -name '*E2E*' \) -print 2>/dev/null)
   fi
 
   # Ensure common writable roots remain writable for service/test tools.

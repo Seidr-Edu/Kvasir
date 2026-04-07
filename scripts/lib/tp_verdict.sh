@@ -58,10 +58,10 @@ tp_compute_behavioral_verdict() {
       fi
       ;;
     skipped)
-      if [[ "$TP_REASON" == "no-test-signal" ]]; then
+      if [[ "$TP_REASON" == "no-test-signal" || "$TP_REASON" == "no-portable-test-signal" ]]; then
         TP_BEHAVIORAL_VERDICT="no_test_signal"
-        TP_BEHAVIORAL_VERDICT_REASON="no-test-signal"
-        [[ -n "${TP_STATUS_DETAIL:-}" ]] || TP_STATUS_DETAIL="no_test_signal"
+        TP_BEHAVIORAL_VERDICT_REASON="$TP_REASON"
+        [[ -n "${TP_STATUS_DETAIL:-}" ]] || TP_STATUS_DETAIL="${TP_REASON//-/_}"
       else
         TP_BEHAVIORAL_VERDICT="skipped"
         TP_BEHAVIORAL_VERDICT_REASON="${TP_REASON:-stage-skipped}"
