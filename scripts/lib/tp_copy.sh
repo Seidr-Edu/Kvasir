@@ -78,7 +78,11 @@ def is_test_rel(rel):
         parts = rel.split("/", 2)
         if len(parts) >= 2:
             source_set = parts[1]
-            return bool(re.search(r"(test|spec|^it$|it$|integration|functional|e2e|acceptance|verification)", source_set, re.I))
+            return bool(
+                re.search(r"(test|spec|integration|functional|e2e|acceptance|verification)", source_set, re.I)
+                or source_set.lower() == "it"
+                or re.search(r"(^[iI][tT][A-Z0-9_].*|IT$)", source_set)
+            )
     return False
 
 
@@ -114,9 +118,31 @@ def include_file(rel):
     return True, ""
 
 
+PRUNED_DIR_NAMES = {
+    ".cache",
+    ".git",
+    ".gradle",
+    ".m2",
+    ".nox",
+    ".pnpm-store",
+    ".scannerwork",
+    ".tox",
+    ".venv",
+    ".yarn",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+    "out",
+    "target",
+    "vendor",
+    "venv",
+}
+
 excluded_rows = []
 for base, dirs, files in os.walk(source):
-    dirs[:] = [d for d in dirs if d not in {".git", "target", "build", ".gradle", ".scannerwork", "out"}]
+    dirs[:] = [d for d in dirs if d not in PRUNED_DIR_NAMES]
     for name in files:
         src = os.path.join(base, name)
         rel = relpath(src)

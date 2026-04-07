@@ -352,10 +352,24 @@ tp_execute() {
   TP_BASELINE_ORIGINAL_FAILURE_FIRST_LINE="$TP_BASELINE_LAST_FAILURE_FIRST_LINE"
   set -e
 
-  if [[ "${TP_TEST_SCOPE_STATUS:-unselected}" != "selected" || "${TP_BASELINE_ORIGINAL_RC:-1}" -ne 0 || "${TP_BASELINE_ORIGINAL_TESTS_EXECUTED:-0}" -le 0 ]]; then
+  if [[ "${TP_TEST_SCOPE_STATUS:-unselected}" != "selected" ]]; then
     TP_STATUS="skipped"
-    TP_REASON="no-portable-test-signal"
-    TP_STATUS_DETAIL="no_portable_test_signal"
+    TP_REASON="${TP_TEST_SCOPE_SELECTION_REASON:-no-portable-test-signal}"
+    TP_STATUS_DETAIL="${TP_REASON//-/_}"
+    return 0
+  fi
+
+  if [[ "${TP_BASELINE_ORIGINAL_RC:-1}" -ne 0 ]]; then
+    TP_STATUS="skipped"
+    TP_REASON="baseline-original-nonzero-exit"
+    TP_STATUS_DETAIL="baseline_original_rc_${TP_BASELINE_ORIGINAL_RC}"
+    return 0
+  fi
+
+  if [[ "${TP_BASELINE_ORIGINAL_TESTS_EXECUTED:-0}" -le 0 ]]; then
+    TP_STATUS="skipped"
+    TP_REASON="no-tests-executed"
+    TP_STATUS_DETAIL="no_tests_executed"
     return 0
   fi
 

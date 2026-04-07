@@ -9,6 +9,8 @@ TOOL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/lib/testlib.sh"
 # shellcheck source=/dev/null
 source "${TOOL_ROOT}/scripts/lib/tp_runner.sh"
+# shellcheck source=/dev/null
+source "${TOOL_ROOT}/scripts/lib/tp_copy.sh"
 
 prepare_scope_env() {
   local root="$1"
@@ -499,6 +501,81 @@ GRADLE
   tpt_assert_eq "pass" "$TP_BASELINE_LAST_STATUS" "final selected Gradle run should pass"
 }
 
+case_gradle_task_detection_does_not_treat_git_or_bit_as_it_tasks() {
+  local tmp repo tasks
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+
+  mkdir -p "$repo/src/git/java" "$repo/src/bit/java" "$repo/src/it/java" "$repo/src/smokeIT/java"
+  cat > "${repo}/build.gradle" <<'GRADLE'
+plugins {}
+// The word it in prose should not create an it task.
+tasks.register('integrationTest', Test)
+GRADLE
+
+  tasks="$(tp_detect_gradle_test_tasks "$repo")"
+
+  printf '%s\n' "$tasks" | grep -qx "test" || {
+    echo "ASSERT failed: expected default test task" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "it" || {
+    echo "ASSERT failed: expected explicit it source set" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "smokeIT" || {
+    echo "ASSERT failed: expected smokeIT source set" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "integrationTest" || {
+    echo "ASSERT failed: expected integrationTest build task" >&2
+    return 1
+  }
+  if printf '%s\n' "$tasks" | grep -Eqx 'git|bit'; then
+    echo "ASSERT failed: git/bit source sets must not be detected as test tasks: ${tasks}" >&2
+    return 1
+  fi
+}
+
+case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
+  local tmp repo snapshot
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  snapshot="${tmp}/snapshot"
+
+  prepare_scope_env "$tmp"
+  TP_ORIGINAL_EFFECTIVE_PATH="$repo"
+  TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
+  TP_TEST_SCOPE_RUNNER="maven"
+  TP_TEST_SCOPE_SELECTED_MAVEN_MODE="broad"
+  TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
+
+  mkdir -p \
+    "$repo/src/test/java" \
+    "$repo/src/git/java" \
+    "$repo/src/bit/java" \
+    "$repo/src/smokeIT/java" \
+    "$repo/node_modules/pkg/src/test/java"
+  echo "class UnitTest {}" > "$repo/src/test/java/UnitTest.java"
+  echo "class GitHelper {}" > "$repo/src/git/java/GitHelper.java"
+  echo "class BitHelper {}" > "$repo/src/bit/java/BitHelper.java"
+  echo "class SmokeIT {}" > "$repo/src/smokeIT/java/SmokeIT.java"
+  echo "class VendorTest {}" > "$repo/node_modules/pkg/src/test/java/VendorTest.java"
+
+  tp_snapshot_original_tests
+
+  tpt_assert_file_exists "$snapshot/src/test/java/UnitTest.java" "snapshot should include standard tests"
+  tpt_assert_file_exists "$snapshot/src/smokeIT/java/SmokeIT.java" "snapshot should include explicit IT source sets"
+  if [[ -e "$snapshot/src/git/java/GitHelper.java" || -e "$snapshot/src/bit/java/BitHelper.java" ]]; then
+    echo "ASSERT failed: git/bit source sets must not be snapshotted as tests" >&2
+    return 1
+  fi
+  if [[ -e "$snapshot/node_modules/pkg/src/test/java/VendorTest.java" ]]; then
+    echo "ASSERT failed: pruned dependency trees must not be snapshotted" >&2
+    return 1
+  fi
+}
+
 tpt_run_case "maven uses workspace local repo" case_maven_uses_workspace_local_repo
 tpt_run_case "gradle wrapper invocation unchanged" case_gradle_wrapper_invocation_unchanged
 tpt_run_case "gradle invocation unchanged" case_gradle_invocation_unchanged
@@ -512,5 +589,7 @@ tpt_run_case "portable scope Maven falls back to narrow command" case_portable_s
 tpt_run_case "portable scope Maven skips when no signal exists" case_portable_scope_maven_skips_when_no_portable_signal_exists
 tpt_run_case "portable scope Gradle selects multiple passing tasks" case_portable_scope_gradle_selects_multiple_passing_tasks
 tpt_run_case "portable scope Gradle excludes environment task" case_portable_scope_gradle_excludes_environment_task_but_keeps_unit_task
+tpt_run_case "gradle task detection avoids false it suffixes" case_gradle_task_detection_does_not_treat_git_or_bit_as_it_tasks
+tpt_run_case "snapshot avoids false it suffixes and pruned trees" case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees
 
 tpt_finish_suite

@@ -255,6 +255,16 @@ tp_detect_gradle_test_task() {
   tp_detect_gradle_test_tasks "$repo" | head -1
 }
 
+tp_is_gradle_test_like_name() {
+  local name="$1"
+
+  [[ -n "$name" ]] || return 1
+  [[ "$name" =~ ^[iI][tT]$ ]] && return 0
+  [[ "$name" =~ (^[iI][tT][A-Z0-9_].*|IT$) ]] && return 0
+  [[ "$name" =~ [Tt]est|[Ss]pec|[Ii]ntegration|[Ff]unctional|[Ee]2[Ee]|[Aa]cceptance|[Vv]erification ]] && return 0
+  return 1
+}
+
 tp_detect_gradle_test_tasks() {
   local repo="$1"
   local -a tasks=("test")
@@ -265,7 +275,7 @@ tp_detect_gradle_test_tasks() {
     while IFS= read -r src_dir; do
       name="${src_dir##*/}"
       [[ "$name" == "main" || "$name" == "test" ]] && continue
-      if printf '%s' "$name" | grep -qiE '(test|spec|^it$|it$|^it[A-Z]|integration|functional|e2e|acceptance|verification)'; then
+      if tp_is_gradle_test_like_name "$name"; then
         case "$seen" in
           *"|${name}|"*) ;;
           *)
@@ -283,7 +293,7 @@ tp_detect_gradle_test_tasks() {
     while IFS= read -r name; do
       [[ -n "$name" ]] || continue
       [[ "$name" == "main" || "$name" == "java" || "$name" == "kotlin" || "$name" == "Test" ]] && continue
-      if printf '%s' "$name" | grep -qiE '(test|spec|it$|^it[A-Z]|integration|functional|e2e|acceptance|verification)'; then
+      if tp_is_gradle_test_like_name "$name"; then
         case "$seen" in
           *"|${name}|"*) ;;
           *)
@@ -292,7 +302,7 @@ tp_detect_gradle_test_tasks() {
             ;;
         esac
       fi
-    done < <(grep -Eo '\b[A-Za-z][A-Za-z0-9_]*(Test|IT|Spec)\b|\b(integration|functional|e2e|acceptance|verification)Test\b|\bit\b' "$build_file" 2>/dev/null | LC_ALL=C sort -u)
+    done < <(grep -Eo '\b[A-Za-z][A-Za-z0-9_]*(Test|IT|Spec)\b|\b(integration|functional|e2e|acceptance|verification)Test\b' "$build_file" 2>/dev/null | LC_ALL=C sort -u)
   done
 
   printf '%s\n' "${tasks[@]}"
