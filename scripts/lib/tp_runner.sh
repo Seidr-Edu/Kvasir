@@ -48,6 +48,188 @@ tp_maven_local_repo_path() {
   echo "${TP_MAVEN_LOCAL_REPO:-${repo}/.m2/repository}"
 }
 
+tp_test_scope_csv_add() {
+  local var_name="$1"
+  local value="$2"
+  [[ -n "$value" ]] || return 0
+
+  local current="${!var_name:-}"
+  case ":$current:" in
+    *":${value}:"*) return 0 ;;
+  esac
+  if [[ -z "$current" ]]; then
+    printf -v "$var_name" '%s' "$value"
+  else
+    printf -v "$var_name" '%s' "${current}:${value}"
+  fi
+}
+
+tp_test_scope_reset() {
+  TP_TEST_SCOPE_MODE="portable-tests"
+  TP_TEST_SCOPE_STATUS="unselected"
+  TP_TEST_SCOPE_RUNNER="unknown"
+  TP_TEST_SCOPE_BUILD_TOOL="unknown"
+  TP_TEST_SCOPE_SELECTION_REASON=""
+  TP_TEST_SCOPE_SELECTED_COMMANDS_CSV=""
+  TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
+  TP_TEST_SCOPE_SELECTED_MAVEN_MODE=""
+  TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT=0
+  TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT=0
+  TP_TEST_SCOPE_FAILURE_CLASS=""
+  TP_TEST_SCOPE_FAILURE_LOG=""
+
+  mkdir -p "$(dirname "$TP_TEST_SCOPE_JSON_PATH")"
+  : > "$TP_TEST_SCOPE_PROBES_FILE"
+  : > "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE"
+  : > "$TP_TEST_SCOPE_EXCLUDED_TESTS_FILE"
+}
+
+tp_test_scope_record_probe() {
+  local runner="$1"
+  local command="$2"
+  local rc="$3"
+  local status="$4"
+  local failure_class="$5"
+  local log_file="$6"
+  local tests_executed="$7"
+
+  python3 - <<'PY' "$TP_TEST_SCOPE_PROBES_FILE" "$runner" "$command" "$rc" "$status" "$failure_class" "$log_file" "$tests_executed"
+import json
+import sys
+
+path, runner, command, rc, status, failure_class, log_file, tests_executed = sys.argv[1:]
+with open(path, "a", encoding="utf-8") as f:
+    f.write(json.dumps({
+        "runner": runner,
+        "command": command,
+        "exit_code": int(rc),
+        "status": status,
+        "failure_class": failure_class or None,
+        "log_path": log_file,
+        "tests_executed": int(tests_executed),
+    }, separators=(",", ":")) + "\n")
+PY
+}
+
+tp_test_scope_record_excluded_command() {
+  local runner="$1"
+  local command="$2"
+  local reason="$3"
+  local failure_class="$4"
+  local log_file="$5"
+
+  printf '%s\t%s\t%s\t%s\t%s\n' "$runner" "$command" "$reason" "$failure_class" "$log_file" >> "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE"
+}
+
+tp_test_scope_write_json() {
+  python3 - <<'PY' \
+    "$TP_TEST_SCOPE_JSON_PATH" "$TP_TEST_SCOPE_PROBES_FILE" "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "$TP_TEST_SCOPE_EXCLUDED_TESTS_FILE" \
+    "${TP_TEST_SCOPE_MODE:-portable-tests}" "${TP_TEST_SCOPE_STATUS:-unselected}" "${TP_TEST_SCOPE_RUNNER:-unknown}" "${TP_TEST_SCOPE_BUILD_TOOL:-unknown}" \
+    "${TP_TEST_SCOPE_SELECTION_REASON:-}" "${TP_TEST_SCOPE_SELECTED_COMMANDS_CSV:-}" "${TP_TEST_SCOPE_SELECTED_TASKS_CSV:-}" \
+    "${TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT:-0}" "${TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT:-0}" "${TP_TEST_SCOPE_FAILURE_CLASS:-}"
+import json
+import os
+import sys
+
+(
+    out_path,
+    probes_path,
+    excluded_commands_path,
+    excluded_tests_path,
+    mode,
+    status,
+    runner,
+    build_tool,
+    selection_reason,
+    selected_commands_csv,
+    selected_tasks_csv,
+    included_count,
+    excluded_count,
+    failure_class,
+) = sys.argv[1:]
+
+
+def read_jsonl(path):
+    rows = []
+    if not path or not os.path.exists(path):
+        return rows
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except Exception:
+                continue
+    return rows
+
+
+def read_excluded_commands(path):
+    rows = []
+    if not path or not os.path.exists(path):
+        return rows
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t")
+            while len(parts) < 5:
+                parts.append("")
+            rows.append({
+                "runner": parts[0],
+                "command": parts[1],
+                "reason": parts[2],
+                "failure_class": parts[3] or None,
+                "log_path": parts[4],
+            })
+    return rows
+
+
+def read_excluded_tests(path):
+    rows = []
+    if not path or not os.path.exists(path):
+        return rows
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            line = line.rstrip("\n")
+            if not line:
+                continue
+            parts = line.split("\t", 1)
+            rows.append({
+                "path": parts[0],
+                "reason": parts[1] if len(parts) > 1 else "out-of-scope",
+            })
+    return rows
+
+
+def split_csv(value):
+    return [part for part in value.split(":") if part]
+
+
+obj = {
+    "mode": mode,
+    "status": status,
+    "runner": runner,
+    "build_tool": build_tool,
+    "selection_reason": selection_reason or None,
+    "selected_commands": split_csv(selected_commands_csv),
+    "selected_tasks": split_csv(selected_tasks_csv),
+    "excluded_commands": read_excluded_commands(excluded_commands_path),
+    "included_test_file_count": int(included_count or 0),
+    "excluded_test_file_count": int(excluded_count or 0),
+    "excluded_tests": read_excluded_tests(excluded_tests_path),
+    "probes": read_jsonl(probes_path),
+    "failure_class": failure_class or None,
+}
+
+os.makedirs(os.path.dirname(out_path), exist_ok=True)
+with open(out_path, "w", encoding="utf-8") as f:
+    json.dump(obj, f, indent=2)
+PY
+}
+
 tp_detect_test_source_dirs() {
   local repo="$1"
   local -a dirs=()
@@ -70,49 +252,60 @@ tp_detect_test_source_dirs() {
 
 tp_detect_gradle_test_task() {
   local repo="$1"
+  tp_detect_gradle_test_tasks "$repo" | head -1
+}
 
-  # Standard layout: src/test/java has Java files → use default 'test' task
-  if find "$repo/src/test" -name '*.java' -print -quit 2>/dev/null | grep -q .; then
-    echo "test"
-    return 0
-  fi
+tp_is_gradle_test_like_name() {
+  local name="$1"
 
-  # Parse build.gradle / build.gradle.kts for declared source set or task names
-  local custom_task=""
-  for build_file in "$repo/build.gradle" "$repo/build.gradle.kts"; do
-    [[ -f "$build_file" ]] || continue
-    while IFS= read -r line; do
-      # Match indented identifier followed by '{' — these are sourceSet declarations
-      local name
-      name="$(printf '%s' "$line" | grep -oE '^[[:space:]]+[A-Za-z][A-Za-z0-9_]+[[:space:]]*\{' | grep -oE '[A-Za-z][A-Za-z0-9_]+' | head -1 || true)"
-      if [[ -n "$name" && "$name" != "main" && "$name" != "test" && "$name" != "java" && "$name" != "kotlin" ]]; then
-        if printf '%s' "$name" | grep -qiE '(test|spec|it$|^it[A-Z]|integration|functional|e2e|acceptance|verification)'; then
-          custom_task="$name"
-          break
-        fi
-      fi
-    done < "$build_file"
-    [[ -n "$custom_task" ]] && break
-  done
+  [[ -n "$name" ]] || return 1
+  [[ "$name" =~ ^[iI][tT]$ ]] && return 0
+  [[ "$name" =~ (^[iI][tT][A-Z0-9_].*|IT$) ]] && return 0
+  [[ "$name" =~ [Tt]est|[Ss]pec|[Ii]ntegration|[Ff]unctional|[Ee]2[Ee]|[Aa]cceptance|[Vv]erification ]] && return 0
+  return 1
+}
 
-  if [[ -n "$custom_task" ]]; then
-    echo "$custom_task"
-    return 0
-  fi
+tp_detect_gradle_test_tasks() {
+  local repo="$1"
+  local -a tasks=("test")
+  local seen="|test|"
 
-  # Fallback: first non-main/non-test src/ subdir that actually contains Java files
+  local src_dir name
   if [[ -d "$repo/src" ]]; then
     while IFS= read -r src_dir; do
-      local name="${src_dir##*/}"
+      name="${src_dir##*/}"
       [[ "$name" == "main" || "$name" == "test" ]] && continue
-      if find "$src_dir" -name '*.java' -print -quit 2>/dev/null | grep -q .; then
-        echo "$name"
-        return 0
+      if tp_is_gradle_test_like_name "$name"; then
+        case "$seen" in
+          *"|${name}|"*) ;;
+          *)
+            tasks+=("$name")
+            seen="${seen}${name}|"
+            ;;
+        esac
       fi
     done < <(find "$repo/src" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | LC_ALL=C sort)
   fi
 
-  echo "test"
+  # Parse build.gradle / build.gradle.kts for declared source set or task names.
+  for build_file in "$repo/build.gradle" "$repo/build.gradle.kts"; do
+    [[ -f "$build_file" ]] || continue
+    while IFS= read -r name; do
+      [[ -n "$name" ]] || continue
+      [[ "$name" == "main" || "$name" == "java" || "$name" == "kotlin" || "$name" == "Test" ]] && continue
+      if tp_is_gradle_test_like_name "$name"; then
+        case "$seen" in
+          *"|${name}|"*) ;;
+          *)
+            tasks+=("$name")
+            seen="${seen}${name}|"
+            ;;
+        esac
+      fi
+    done < <(grep -Eo '\b[A-Za-z][A-Za-z0-9_]*(Test|IT|Spec)\b|\b(integration|functional|e2e|acceptance|verification)Test\b' "$build_file" 2>/dev/null | LC_ALL=C sort -u)
+  done
+
+  printf '%s\n' "${tasks[@]}"
 }
 
 tp_detect_test_frameworks() {
@@ -237,18 +430,71 @@ tp_run_gradle_test() {
   local repo="$1"
   local log_file="$2"
   local runner="$3"
-  local gradle_user_home tmp_dir test_task
+  local test_task
+
+  test_task="$(tp_detect_gradle_test_task "$repo")"
+  tp_run_gradle_test_tasks "$repo" "$log_file" "$runner" "$test_task"
+}
+
+tp_run_gradle_test_tasks() {
+  local repo="$1"
+  local log_file="$2"
+  local runner="$3"
+  shift 3
+  local -a tasks=("$@")
+  local gradle_user_home tmp_dir
+
+  [[ "${#tasks[@]}" -gt 0 ]] || tasks=("test")
 
   gradle_user_home="${TP_GRADLE_USER_HOME:-${repo}/.gradle}"
   tmp_dir="${TP_TMP_DIR:-${repo}/tmp}"
-  test_task="$(tp_detect_gradle_test_task "$repo")"
   mkdir -p "$gradle_user_home" "$tmp_dir"
 
   if [[ "$runner" == "gradle-wrapper" ]]; then
-    (cd "$repo" && env "GRADLE_USER_HOME=$gradle_user_home" "TMPDIR=$tmp_dir" ./gradlew "$test_task" --no-daemon) >"$log_file" 2>&1
+    (cd "$repo" && env "GRADLE_USER_HOME=$gradle_user_home" "TMPDIR=$tmp_dir" ./gradlew "${tasks[@]}" --no-daemon) >"$log_file" 2>&1
   else
-    (cd "$repo" && env "GRADLE_USER_HOME=$gradle_user_home" "TMPDIR=$tmp_dir" gradle "$test_task" --no-daemon) >"$log_file" 2>&1
+    (cd "$repo" && env "GRADLE_USER_HOME=$gradle_user_home" "TMPDIR=$tmp_dir" gradle "${tasks[@]}" --no-daemon) >"$log_file" 2>&1
   fi
+}
+
+tp_run_selected_portable_tests() {
+  local repo="$1"
+  local log_file="$2"
+  local runner
+  runner="$(tp_detect_test_runner "$repo")"
+  local -a tasks=()
+  local task
+
+  case "$runner" in
+    maven)
+      case "${TP_TEST_SCOPE_SELECTED_MAVEN_MODE:-broad}" in
+        narrow)
+          tp_run_maven_test "$repo" "$log_file" \
+            "-DskipITs" "-DskipIT=true" "-DskipIntegrationTests=true" \
+            "-DexcludedGroups=integration,IntegrationTest" \
+            test
+          ;;
+        *)
+          tp_run_maven_test "$repo" "$log_file" test
+          ;;
+      esac
+      ;;
+    gradle-wrapper|gradle)
+      IFS=':' read -r -a tasks <<< "${TP_TEST_SCOPE_SELECTED_TASKS_CSV:-}"
+      if [[ "${#tasks[@]}" -eq 0 || -z "${tasks[0]:-}" ]]; then
+        echo "no selected portable Gradle tasks" >"$log_file"
+        return 2
+      fi
+      for task in "${tasks[@]}"; do
+        [[ -n "$task" ]] || continue
+      done
+      tp_run_gradle_test_tasks "$repo" "$log_file" "$runner" "${tasks[@]}"
+      ;;
+    *)
+      echo "unsupported test runner" >"$log_file"
+      return 2
+      ;;
+  esac
 }
 
 tp_run_tests() {
@@ -264,8 +510,15 @@ tp_run_tests() {
 
   set +e
   case "$runner" in
-    maven) tp_run_maven_test "$repo" "$log_file" test ;;
-    gradle-wrapper|gradle) tp_run_gradle_test "$repo" "$log_file" "$runner" ;;
+    maven|gradle-wrapper|gradle)
+      if [[ "${TP_TEST_SCOPE_STATUS:-}" == "selected" ]]; then
+        tp_run_selected_portable_tests "$repo" "$log_file"
+      elif [[ "$runner" == "maven" ]]; then
+        tp_run_maven_test "$repo" "$log_file" test
+      else
+        tp_run_gradle_test "$repo" "$log_file" "$runner"
+      fi
+      ;;
     *)
       echo "unsupported test runner" >"$log_file"
       tp_restore_errexit "$had_errexit"
@@ -412,6 +665,7 @@ PY
 tp_failure_class_to_legacy() {
   local failure_class="$1"
   case "$failure_class" in
+    environment-assumption-failure) echo "environmental-build" ;;
     dependency-resolution-failure) echo "environmental-build" ;;
     compilation-failure) echo "compatibility-build" ;;
     assertion-failure) echo "behavioral-mismatch" ;;
@@ -423,6 +677,7 @@ tp_failure_class_to_legacy() {
 tp_baseline_failure_type_from_class() {
   local failure_class="$1"
   case "$failure_class" in
+    environment-assumption-failure) echo "environmental-noise" ;;
     dependency-resolution-failure) echo "environmental-noise" ;;
     compilation-failure) echo "compatibility" ;;
     assertion-failure) echo "behavioral" ;;
@@ -448,6 +703,10 @@ tp_infer_baseline_failure_type() {
   fi
 
   case "$full_class" in
+    environment-assumption-failure)
+      echo "environmental-noise"
+      return 0
+      ;;
     dependency-resolution-failure)
       echo "environmental-noise"
       return 0
@@ -462,7 +721,7 @@ tp_infer_baseline_failure_type() {
       ;;
     test-launcher-crash|runtime-test-failure)
       case "$unit_class" in
-        dependency-resolution-failure|test-launcher-crash|runtime-test-failure|unknown) echo "environmental-noise" ;;
+        environment-assumption-failure|dependency-resolution-failure|test-launcher-crash|runtime-test-failure|unknown) echo "environmental-noise" ;;
         *) echo "runtime" ;;
       esac
       return 0
@@ -470,6 +729,7 @@ tp_infer_baseline_failure_type() {
   esac
 
   case "$unit_class" in
+    environment-assumption-failure) echo "environmental-noise" ;;
     dependency-resolution-failure) echo "environmental-noise" ;;
     compilation-failure) echo "compatibility" ;;
     assertion-failure) echo "behavioral" ;;
@@ -520,7 +780,13 @@ tp_classify_test_failure_log() {
   local subclass="unknown"
 
   if LC_ALL=C grep -Eiq \
-    'Non-resolvable parent POM|Could not transfer artifact|Could not find artifact|Could not resolve (dependencies|artifact)|Unknown host|No such host|Connection refused|Connection timed out|Read timed out|Temporary failure in name resolution|nodename nor servname provided|PKIX path building failed|Network is unreachable|No route to host|Failed to connect to' \
+    'Connection refused|Connection timed out|Read timed out|UnknownHostException|ConnectException|No such host|No route to host|Network is unreachable|Failed to connect to|Cannot connect to the Docker daemon|No Docker environment|Docker daemon|testcontainers|Testcontainers|Ryuk|LocalStack|Postgres|PostgreSQL|MySQL|MariaDB|Redis|Kafka|RabbitMQ|ZooKeeper|MongoDB|Elasticsearch|missing (environment variable|credential|credentials|configuration|config)|AccessDenied|Unauthorized|Forbidden|NoSuchBucket|No credentials|Unable to load credentials|port [0-9]+|ECONNREFUSED' \
+    "$log_file"; then
+    class="environment-assumption-failure"
+    phase="environment"
+    subclass="environment-assumption-failure"
+  elif LC_ALL=C grep -Eiq \
+    'Non-resolvable parent POM|Could not transfer artifact|Could not find artifact|Could not resolve (dependencies|artifact)|Unknown host|No such host|Temporary failure in name resolution|nodename nor servname provided|PKIX path building failed' \
     "$log_file"; then
     class="dependency-resolution-failure"
     phase="dependency-resolution"
@@ -559,6 +825,221 @@ tp_classify_test_failure_log() {
   echo "$class"
 }
 
+tp_is_environment_assumption_failure_class() {
+  case "${1:-}" in
+    environment-assumption-failure|dependency-resolution-failure|test-launcher-crash|runtime-test-failure)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+tp_scope_probe_maven() {
+  local repo="$1"
+  local label="$2"
+  local log_file="$3"
+  shift 3
+  local -a args=("$@")
+  local rc failure_class status tests_executed
+
+  tp_clean_junit_outputs "$repo"
+  tp_run_maven_test "$repo" "$log_file" "${args[@]}"
+  rc=$?
+  tp_collect_execution_summary "$repo" "$log_file" "TP_SCOPE_PROBE"
+  tests_executed="${TP_SCOPE_PROBE_TESTS_EXECUTED:-0}"
+  failure_class=""
+  if [[ "$rc" -ne 0 ]]; then
+    tp_classify_test_failure_log "$log_file" >/dev/null
+    failure_class="${TP_LAST_FAILURE_CLASS:-unknown}"
+  fi
+  status="$(tp_test_rc_status "$rc")"
+  tp_test_scope_record_probe "maven" "$label" "$rc" "$status" "$failure_class" "$log_file" "$tests_executed"
+  TP_SCOPE_PROBE_RC="$rc"
+  TP_SCOPE_PROBE_FAILURE_CLASS="$failure_class"
+  TP_SCOPE_PROBE_EXECUTED="$tests_executed"
+  return 0
+}
+
+tp_scope_probe_gradle_task() {
+  local repo="$1"
+  local runner="$2"
+  local task="$3"
+  local log_file="$4"
+  local rc failure_class status tests_executed
+
+  tp_clean_junit_outputs "$repo"
+  tp_run_gradle_test_tasks "$repo" "$log_file" "$runner" "$task"
+  rc=$?
+  tp_collect_execution_summary "$repo" "$log_file" "TP_SCOPE_PROBE"
+  tests_executed="${TP_SCOPE_PROBE_TESTS_EXECUTED:-0}"
+  failure_class=""
+  if [[ "$rc" -ne 0 ]]; then
+    tp_classify_test_failure_log "$log_file" >/dev/null
+    failure_class="${TP_LAST_FAILURE_CLASS:-unknown}"
+  fi
+  status="$(tp_test_rc_status "$rc")"
+  tp_test_scope_record_probe "$runner" "$task" "$rc" "$status" "$failure_class" "$log_file" "$tests_executed"
+  TP_SCOPE_PROBE_RC="$rc"
+  TP_SCOPE_PROBE_FAILURE_CLASS="$failure_class"
+  TP_SCOPE_PROBE_EXECUTED="$tests_executed"
+  return 0
+}
+
+tp_select_portable_test_scope() {
+  local repo="$1"
+  local runner
+  local probe_log
+  local had_errexit=false
+  [[ $- == *e* ]] && had_errexit=true
+
+  tp_test_scope_reset
+  runner="$(tp_detect_test_runner "$repo")"
+  TP_TEST_SCOPE_RUNNER="$runner"
+  TP_TEST_SCOPE_BUILD_TOOL="$(tp_build_env_runner_to_build_tool "$runner" 2>/dev/null || echo "unknown")"
+
+  set +e
+  case "$runner" in
+    maven)
+      probe_log="${TP_LOG_DIR}/scope-original-maven-broad.log"
+      tp_scope_probe_maven "$repo" "mvn test" "$probe_log" test
+      if [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 && "${TP_SCOPE_PROBE_EXECUTED:-0}" -gt 0 ]]; then
+        TP_TEST_SCOPE_STATUS="selected"
+        TP_TEST_SCOPE_SELECTION_REASON="broad-command-passed"
+        TP_TEST_SCOPE_SELECTED_MAVEN_MODE="broad"
+        tp_test_scope_csv_add TP_TEST_SCOPE_SELECTED_COMMANDS_CSV "mvn test"
+        tp_test_scope_write_json
+        tp_restore_errexit "$had_errexit"
+        return 0
+      fi
+
+      if [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 ]]; then
+        tp_test_scope_record_excluded_command "maven" "mvn test" "no-test-signal" "" "$probe_log"
+      elif tp_is_environment_assumption_failure_class "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"; then
+        tp_test_scope_record_excluded_command "maven" "mvn test" "environment-assumption-failure" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+        probe_log="${TP_LOG_DIR}/scope-original-maven-narrow.log"
+        tp_scope_probe_maven "$repo" "mvn -DskipITs -DskipIT=true -DskipIntegrationTests=true -DexcludedGroups=integration,IntegrationTest test" "$probe_log" \
+          "-DskipITs" "-DskipIT=true" "-DskipIntegrationTests=true" \
+          "-DexcludedGroups=integration,IntegrationTest" \
+          test
+        if [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 && "${TP_SCOPE_PROBE_EXECUTED:-0}" -gt 0 ]]; then
+          TP_TEST_SCOPE_STATUS="selected"
+          TP_TEST_SCOPE_SELECTION_REASON="narrow-command-passed-after-environment-exclusion"
+          TP_TEST_SCOPE_SELECTED_MAVEN_MODE="narrow"
+          tp_test_scope_csv_add TP_TEST_SCOPE_SELECTED_COMMANDS_CSV "mvn -DskipITs -DskipIT=true -DskipIntegrationTests=true -DexcludedGroups=integration,IntegrationTest test"
+          tp_test_scope_write_json
+          tp_restore_errexit "$had_errexit"
+          return 0
+        fi
+        if [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 ]]; then
+          tp_test_scope_record_excluded_command "maven" "mvn -DskipITs -DskipIT=true -DskipIntegrationTests=true -DexcludedGroups=integration,IntegrationTest test" "no-test-signal" "" "$probe_log"
+        elif tp_is_environment_assumption_failure_class "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"; then
+          tp_test_scope_record_excluded_command "maven" "mvn -DskipITs -DskipIT=true -DskipIntegrationTests=true -DexcludedGroups=integration,IntegrationTest test" "environment-assumption-failure" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+        else
+          tp_test_scope_record_excluded_command "maven" "mvn -DskipITs -DskipIT=true -DskipIntegrationTests=true -DexcludedGroups=integration,IntegrationTest test" "scope-probe-failed" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+          TP_TEST_SCOPE_FAILURE_CLASS="${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"
+          TP_TEST_SCOPE_FAILURE_LOG="$probe_log"
+        fi
+      else
+        tp_test_scope_record_excluded_command "maven" "mvn test" "scope-probe-failed" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+        TP_TEST_SCOPE_FAILURE_CLASS="${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"
+        TP_TEST_SCOPE_FAILURE_LOG="$probe_log"
+      fi
+      ;;
+    gradle-wrapper|gradle)
+      local task
+      while IFS= read -r task; do
+        [[ -n "$task" ]] || continue
+        probe_log="${TP_LOG_DIR}/scope-original-gradle-${task}.log"
+        tp_scope_probe_gradle_task "$repo" "$runner" "$task" "$probe_log"
+        if [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 && "${TP_SCOPE_PROBE_EXECUTED:-0}" -gt 0 ]]; then
+          TP_TEST_SCOPE_STATUS="selected"
+          TP_TEST_SCOPE_SELECTION_REASON="one-or-more-gradle-tasks-passed"
+          tp_test_scope_csv_add TP_TEST_SCOPE_SELECTED_TASKS_CSV "$task"
+          tp_test_scope_csv_add TP_TEST_SCOPE_SELECTED_COMMANDS_CSV "gradle ${task}"
+        elif [[ "${TP_SCOPE_PROBE_RC:-1}" -eq 0 ]]; then
+          tp_test_scope_record_excluded_command "$runner" "$task" "no-test-signal" "" "$probe_log"
+        elif tp_is_environment_assumption_failure_class "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"; then
+          tp_test_scope_record_excluded_command "$runner" "$task" "environment-assumption-failure" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+        else
+          tp_test_scope_record_excluded_command "$runner" "$task" "scope-probe-failed" "${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}" "$probe_log"
+          TP_TEST_SCOPE_FAILURE_CLASS="${TP_SCOPE_PROBE_FAILURE_CLASS:-unknown}"
+          TP_TEST_SCOPE_FAILURE_LOG="$probe_log"
+        fi
+      done < <(tp_detect_gradle_test_tasks "$repo")
+
+      if [[ "$TP_TEST_SCOPE_STATUS" == "selected" ]]; then
+        tp_test_scope_write_json
+        tp_restore_errexit "$had_errexit"
+        return 0
+      fi
+      ;;
+    *)
+      TP_TEST_SCOPE_SELECTION_REASON="unsupported-test-runner"
+      ;;
+  esac
+
+  TP_TEST_SCOPE_STATUS="none"
+  [[ -n "$TP_TEST_SCOPE_SELECTION_REASON" ]] || TP_TEST_SCOPE_SELECTION_REASON="no-portable-test-signal"
+  tp_test_scope_write_json
+  tp_restore_errexit "$had_errexit"
+  return 2
+}
+
+tp_set_baseline_last_from_test_run() {
+  local rc="$1"
+  local log_file="$2"
+
+  TP_BASELINE_LAST_STATUS="$(tp_test_rc_status "$rc")"
+  TP_BASELINE_LAST_UNIT_ONLY_RC=-1
+  TP_BASELINE_LAST_FULL_RC=-1
+  TP_BASELINE_LAST_FAILURE_CLASS=""
+  TP_BASELINE_LAST_FAILURE_CLASS_LEGACY=""
+  TP_BASELINE_LAST_FAILURE_TYPE=""
+  TP_BASELINE_LAST_FAILURE_PHASE=""
+  TP_BASELINE_LAST_FAILURE_SUBCLASS=""
+  TP_BASELINE_LAST_FAILURE_FIRST_LINE=""
+
+  if [[ "$rc" -ne 0 && "$rc" -ne 2 ]]; then
+    tp_classify_test_failure_log "$log_file" >/dev/null
+    TP_BASELINE_LAST_FAILURE_CLASS="${TP_LAST_FAILURE_CLASS:-unknown}"
+    TP_BASELINE_LAST_FAILURE_CLASS_LEGACY="$TP_LAST_FAILURE_CLASS_LEGACY"
+    TP_BASELINE_LAST_FAILURE_PHASE="$TP_LAST_FAILURE_PHASE"
+    TP_BASELINE_LAST_FAILURE_SUBCLASS="$TP_LAST_FAILURE_SUBCLASS"
+    TP_BASELINE_LAST_FAILURE_FIRST_LINE="$TP_LAST_FAILURE_FIRST_LINE"
+    TP_BASELINE_LAST_FAILURE_TYPE="$(tp_baseline_failure_type_from_class "$TP_BASELINE_LAST_FAILURE_CLASS")"
+  fi
+}
+
+tp_select_and_run_portable_scope() {
+  local repo="$1"
+  local log_file="$2"
+  local rc=2
+
+  TP_BASELINE_LAST_STRATEGY="portable-tests"
+  TP_BASELINE_LAST_STATUS="skipped"
+  TP_BASELINE_LAST_UNIT_ONLY_RC=-1
+  TP_BASELINE_LAST_FULL_RC=-1
+  TP_BASELINE_LAST_FAILURE_CLASS=""
+  TP_BASELINE_LAST_FAILURE_CLASS_LEGACY=""
+  TP_BASELINE_LAST_FAILURE_TYPE=""
+  TP_BASELINE_LAST_FAILURE_PHASE=""
+  TP_BASELINE_LAST_FAILURE_SUBCLASS=""
+  TP_BASELINE_LAST_FAILURE_FIRST_LINE=""
+
+  if ! tp_select_portable_test_scope "$repo"; then
+    echo "no portable test scope selected" >"$log_file"
+    return 2
+  fi
+
+  tp_clean_junit_outputs "$repo"
+  tp_run_tests "$repo" "$log_file"
+  rc=$?
+  tp_set_baseline_last_from_test_run "$rc" "$log_file"
+  return "$rc"
+}
+
 tp_run_baseline_tests() {
   local repo="$1"
   local log_file="$2"
@@ -587,6 +1068,16 @@ tp_run_baseline_tests() {
   TP_BASELINE_LAST_FAILURE_PHASE=""
   TP_BASELINE_LAST_FAILURE_SUBCLASS=""
   TP_BASELINE_LAST_FAILURE_FIRST_LINE=""
+
+  if [[ "${TP_TEST_SCOPE_STATUS:-}" == "selected" ]]; then
+    TP_BASELINE_LAST_STRATEGY="portable-tests"
+    set +e
+    tp_run_tests "$repo" "$log_file"
+    rc=$?
+    tp_set_baseline_last_from_test_run "$rc" "$log_file"
+    tp_restore_errexit "$had_errexit"
+    return "$rc"
+  fi
 
   set +e
   case "$runner" in

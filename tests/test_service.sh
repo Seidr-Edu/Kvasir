@@ -50,14 +50,17 @@ json_path, expected_status, expected_reason, expected_detail, expected_verdict =
 with open(json_path, "r", encoding="utf-8") as f:
     obj = json.load(f)
 
-if obj.get("status") != expected_status:
-    raise SystemExit(f"expected status {expected_status!r}, got {obj.get('status')!r}")
-if obj.get("reason") != expected_reason:
-    raise SystemExit(f"expected reason {expected_reason!r}, got {obj.get('reason')!r}")
-if obj.get("status_detail") != expected_detail:
-    raise SystemExit(f"expected status_detail {expected_detail!r}, got {obj.get('status_detail')!r}")
-if obj.get("behavioral_verdict") != expected_verdict:
-    raise SystemExit(f"expected behavioral_verdict {expected_verdict!r}, got {obj.get('behavioral_verdict')!r}")
+if obj.get("schema_version") != "kvasir.test_port.v3":
+    raise SystemExit(f"expected v3 schema, got {obj.get('schema_version')!r}")
+result = obj.get("result", {})
+if result.get("status") != expected_status:
+    raise SystemExit(f"expected status {expected_status!r}, got {result.get('status')!r}")
+if result.get("reason") != expected_reason:
+    raise SystemExit(f"expected reason {expected_reason!r}, got {result.get('reason')!r}")
+if result.get("verdict") != expected_verdict:
+    raise SystemExit(f"expected verdict {expected_verdict!r}, got {result.get('verdict')!r}")
+if expected_detail and result.get("verdict_reason") not in {expected_detail, expected_detail.replace("_", "-"), expected_reason}:
+    raise SystemExit(f"expected related verdict reason for {expected_detail!r}, got {result.get('verdict_reason')!r}")
 PY
 }
 
@@ -86,8 +89,10 @@ import sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
 
-if obj.get("status") != "passed":
-    raise SystemExit(f"expected passed status, got {obj.get('status')!r}")
+if obj.get("schema_version") != "kvasir.test_port.v3":
+    raise SystemExit(f"expected v3 schema, got {obj.get('schema_version')!r}")
+if obj.get("result", {}).get("status") != "passed":
+    raise SystemExit(f"expected passed status, got {obj.get('result')!r}")
 if obj.get("inputs", {}).get("adapter") != "codex":
     raise SystemExit(f"expected codex adapter, got {obj.get('inputs', {}).get('adapter')!r}")
 if not obj.get("artifacts", {}).get("ported_repo"):
@@ -193,7 +198,7 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
 
 if obj.get("run_id") != "manifest-run-1":
     raise SystemExit(f"expected manifest run_id, got {obj.get('run_id')!r}")
-ignored = obj.get("write_scope", {}).get("ignored_prefixes", [])
+ignored = obj.get("diagnostics", {}).get("write_scope", {}).get("ignored_prefixes", [])
 if "./custom/cache/" not in ignored:
     raise SystemExit(f"expected custom ignore prefix, got {ignored!r}")
 PY
@@ -319,8 +324,8 @@ if obj.get("inputs", {}).get("original_subdir") != "app":
     raise SystemExit(f"expected original_subdir from hints, got {obj.get('inputs', {}).get('original_subdir')!r}")
 if obj.get("inputs", {}).get("generated_subdir") != "app":
     raise SystemExit(f"expected generated_subdir from hints, got {obj.get('inputs', {}).get('generated_subdir')!r}")
-baseline_original = obj.get("baseline_original_tests", {}).get("build_environment", {})
-baseline_generated = obj.get("baseline_generated_tests", {}).get("build_environment", {})
+baseline_original = obj.get("baselines", {}).get("original", {}).get("build_environment", {})
+baseline_generated = obj.get("baselines", {}).get("generated", {}).get("build_environment", {})
 if baseline_original.get("hint", {}).get("source") != "lidskjalv-original":
     raise SystemExit(f"expected original hint source, got {baseline_original!r}")
 if baseline_generated.get("hint", {}).get("source") != "lidskjalv-generated":

@@ -46,6 +46,7 @@ case_report_emits_ignored_prefixes() {
   TP_WRITE_SCOPE_CHANGE_SET_PATH="${tmp}/ported-protected-change-set.tsv"
   TP_WRITE_SCOPE_IGNORED_PREFIXES_CSV="./completion/proof/logs/:./.mvn_repo/:./custom/cache/"
   TP_EVIDENCE_JSON_PATH="${tmp}/retention-evidence.json"
+  TP_TEST_SCOPE_JSON_PATH="${tmp}/test-scope.json"
   TP_REMOVED_TESTS_MANIFEST_REL="./completion/proof/logs/test-port-removed-tests.tsv"
   TP_RETENTION_POLICY_MODE="maximize-retained-original-tests"
   TP_RETENTION_DOCUMENTED_REMOVALS_REQUIRED=true
@@ -138,6 +139,27 @@ TSV
   ]
 }
 JSON
+  cat > "$TP_TEST_SCOPE_JSON_PATH" <<'JSON'
+{
+  "mode": "portable-tests",
+  "status": "selected",
+  "runner": "maven",
+  "build_tool": "maven",
+  "selection_reason": "broad-command-passed",
+  "selected_commands": ["mvn test"],
+  "selected_tasks": [],
+  "excluded_commands": [],
+  "included_test_file_count": 2,
+  "excluded_test_file_count": 1,
+  "excluded_tests": [
+    {
+      "path": "./src/test/java/OriginalIT.java",
+      "reason": "environment-scope-excluded"
+    }
+  ],
+  "probes": []
+}
+JSON
   echo "class AdaptedTest {}" > "${TP_PORTED_REPO}/src/test/java/AdaptedTest.java"
   mkdir -p "${TP_PORTED_REPO}/target/surefire-reports"
   cat > "${TP_PORTED_REPO}/target/surefire-reports/TEST-fake.xml" <<'XML'
@@ -159,36 +181,48 @@ XML
 import json, sys
 with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
+if obj.get("schema_version") != "kvasir.test_port.v3":
+    raise SystemExit(f"unexpected schema: {obj.get('schema_version')}")
+for removed in ("status", "status_detail", "failure_class_legacy", "baseline_original_tests", "baseline_generated_tests", "ported_original_tests", "suite_shape", "removed_original_tests", "unit_only_exit_code", "full_fallback_exit_code"):
+    if removed in obj:
+        raise SystemExit(f"legacy field should be absent: {removed}")
+if obj.get("result", {}).get("status") != "failed":
+    raise SystemExit(f"unexpected result: {obj.get('result')}")
 expected = ["./completion/proof/logs/", "./.mvn_repo/", "./custom/cache/"]
-actual = obj["write_scope"].get("ignored_prefixes", [])
+actual = obj["diagnostics"]["write_scope"].get("ignored_prefixes", [])
 if actual != expected:
     raise SystemExit(f"unexpected ignored_prefixes: {actual}")
-if obj["write_scope"].get("violation_count") != 1:
+if obj["diagnostics"]["write_scope"].get("violation_count") != 1:
     raise SystemExit("unexpected violation_count")
-shape = obj.get("suite_shape", {})
+if "policy" in obj["diagnostics"]["write_scope"]:
+    raise SystemExit(f"write-scope policy plumbing should be absent: {obj['diagnostics']['write_scope']}")
+scope = obj.get("test_scope", {})
+if scope.get("mode") != "portable-tests" or scope.get("selected_commands") != ["mvn test"]:
+    raise SystemExit(f"unexpected test scope: {scope}")
+if scope.get("included_test_file_count") != 2 or scope.get("excluded_test_file_count") != 1:
+    raise SystemExit(f"unexpected scope counts: {scope}")
+shape = obj.get("evidence", {}).get("retention", {})
 if shape.get("retained_original_test_file_count") != 1:
     raise SystemExit(f"unexpected retained count: {shape}")
 if shape.get("removed_original_test_file_count") != 1:
     raise SystemExit(f"unexpected removed count: {shape}")
 if shape.get("retention_ratio") != 0.5:
     raise SystemExit(f"unexpected retention ratio: {shape}")
-removed = obj.get("removed_original_tests", [])
+removed = shape.get("removed_tests", [])
 if len(removed) != 1 or removed[0].get("path") != "./src/test/java/OriginalRemovedTest.java":
     raise SystemExit(f"unexpected removed_original_tests: {removed}")
-policy = obj.get("retention_policy", {})
-if policy.get("mode") != "maximize-retained-original-tests":
-    raise SystemExit(f"unexpected retention policy mode: {policy}")
-if policy.get("undocumented_removed_test_count") != 0:
-    raise SystemExit(f"unexpected undocumented count: {policy}")
-baseline = obj.get("baseline_original_tests", {})
+for removed_field in ("policy", "documented_removals_required", "manifest_rel_path"):
+    if removed_field in shape:
+        raise SystemExit(f"retention policy plumbing should be absent: {shape}")
+if shape.get("undocumented_removed_test_count") != 0:
+    raise SystemExit(f"unexpected undocumented count: {shape}")
+baseline = obj.get("baselines", {}).get("original", {})
 if baseline.get("strategy") != "maven-unit-first-fallback-full":
     raise SystemExit(f"unexpected baseline strategy: {baseline}")
-if baseline.get("unit_only_exit_code") != 0:
-    raise SystemExit(f"unexpected baseline unit-only rc: {baseline}")
 build_env = baseline.get("build_environment", {})
 if build_env.get("selected_jdk") != "17":
     raise SystemExit(f"unexpected baseline selected_jdk: {build_env}")
-generated_env = obj.get("baseline_generated_tests", {}).get("build_environment", {})
+generated_env = obj.get("baselines", {}).get("generated", {}).get("build_environment", {})
 if generated_env.get("attempted_jdks") != ["11", "17"]:
     raise SystemExit(f"unexpected generated attempted_jdks: {generated_env}")
 if generated_env.get("hint", {}).get("source") != "lidskjalv-generated":
@@ -198,12 +232,11 @@ if artifacts.get("ported_repo") is None:
     raise SystemExit(f"expected promoted ported repo artifact, got {artifacts}")
 PY
 
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Write-scope ignored prefixes" "summary should mention ignored prefixes"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "./completion/proof/logs/" "summary should include resolved ignored prefixes"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Retention policy" "summary should mention retention policy"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Schema: kvasir.test_port.v3" "summary should mention v3 schema"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Test scope" "summary should mention portable test scope"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Portable test files included/excluded" "summary should include scope counts"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Removed original tests" "summary should include removed-test count"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Baseline generated build env" "summary should include generated build environment"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "selected_jdk=17" "summary should include selected JDK details"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Baseline generated" "summary should include generated baseline"
 }
 
 tpt_run_case "report includes ignored prefixes in json and summary" case_report_emits_ignored_prefixes

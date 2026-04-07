@@ -1,7 +1,7 @@
 # Kvasir (test-port)
 
 Standalone model-driven test adaptation/evaluation tool used by experiments.
-The external service/repo name is `Kvasir`; the runner, artifact, and schema naming remain `test-port` for compatibility.
+The external service/repo name is `Kvasir`; the runner and artifact naming remain `test-port`.
 
 ## Purpose
 
@@ -157,7 +157,7 @@ TP_WRITE_SCOPE_IGNORE_PREFIXES="tmp/cache:generated/reports" \
   --write-scope-ignore-prefix completion/proof/logs
 ```
 
-Ignored prefixes are reported in `test_port.json` under `write_scope.ignored_prefixes`.
+Ignored prefixes are reported in `test_port.json` under `diagnostics.write_scope.ignored_prefixes`.
 
 ## Maven local repository
 
@@ -176,6 +176,27 @@ When Gradle is detected, test-port runs with:
 
 This keeps Gradle cache/temp writes hermetic to the run workspace.
 
+## Portable test scope
+
+Kvasir defaults to `portable-tests` scope.
+
+Portable tests are the tests that execute successfully in Kvasir's service environment. Integration, functional, or e2e-style tests are included when they pass without special environment assumptions. Tests or tasks are excluded from the porting scope when the original repo probe fails due missing services, credentials, Docker/Testcontainers, databases, brokers, network/config assumptions, or zero executed tests.
+
+Maven scope selection:
+
+- Probe broad `mvn test`.
+- If broad passes and executes tests, port that scope.
+- If broad fails with an environment assumption, probe a narrower command with integration-skip flags.
+- If no command passes with non-zero executed tests, skip with `reason=no-portable-test-signal`.
+
+Gradle scope selection:
+
+- Probe candidate test tasks independently.
+- Include passing tasks such as `test`, `integrationTest`, `functionalTest`, or `e2e`.
+- Exclude failing environment-dependent tasks while keeping passing tasks.
+
+Scope decisions are reported in `test_port.json` under `test_scope`, including selected commands/tasks, excluded commands/tasks with reasons, probe logs, and included/excluded test-file counts.
+
 ## Module/subdir selection
 
 - `--original-subdir` selects the original module root for baseline snapshotting.
@@ -190,7 +211,7 @@ Test-port maximizes retained original tests across iterations:
 - It keeps iterating (up to `--max-iter`) and selects the best valid iteration with the highest retained original-test count.
 - It stops early only when full retention is reached.
 
-Retained/removed metrics are reported in `test_port.json` under `suite_shape`:
+Retained/removed metrics are reported in `test_port.json` under `evidence.retention`:
 
 - `retained_original_test_file_count`
 - `removed_original_test_file_count`
@@ -220,51 +241,53 @@ Undocumented or invalidly documented removed original tests fail the iteration w
 
 The reason column must include a concrete, non-placeholder rationale.
 
-Detailed entries are reported in `test_port.json` under `removed_original_tests`.
+Detailed entries are reported in `test_port.json` under `evidence.retention.removed_tests`.
 
 ## Runner preflight and no-test-signal
 
-Before running adaptation/baselines, test-port captures `runner_preflight` in `test_port.json`:
+Before running adaptation/baselines, test-port captures runner diagnostics in `test_port.json`:
 
-- `detected_runner`
-- `supported`
-- `missing_capabilities[]`
-- `module_root`
-- `frameworks_detected[]`
+- `diagnostics.runner.detected_runner`
+- `diagnostics.runner.supported`
+- `diagnostics.runner.missing_capabilities[]`
+- `diagnostics.runner.module_root`
+- `diagnostics.runner.frameworks_detected[]`
 
 Unsupported/missing capabilities produce:
 
-- `status=skipped`
-- `reason=unsupported-test-runner`
-- `status_detail=unsupported_runner`
+- `result.status=skipped`
+- `result.reason=unsupported-test-runner`
 
 If tests exit `0` but `tests_executed == 0`, test-port does not emit a pass verdict:
 
-- `status=skipped`
-- `reason=no-test-signal`
-- `status_detail=no_test_signal`
-- `behavioral_verdict=no_test_signal`
+- `result.status=skipped`
+- `result.reason=no-test-signal` or `result.reason=no-portable-test-signal`
+- `result.verdict=no_test_signal`
 
-## Output schema v2 highlights
+## Output schema v3 highlights
 
-`outputs/test_port.json` is now schema `version: 2` with additive compatibility fields:
+`outputs/test_port.json` uses `schema_version: "kvasir.test_port.v3"` with compact per-run sections:
 
-- `status_detail`
-- `failure_class_legacy`
-- `runner_preflight`
-- `failure_diagnostics`
-- per-suite `execution_summary` for baseline/generated/ported suites
-- suite rewrite metrics: `retained_modified_count`, `retained_unchanged_count`, `assertion_line_change_count`
+- `result`
+- `inputs`
+- `test_scope`
+- `baselines`
+- `porting`
+- `evidence`
+- `diagnostics`
+- `artifacts`
 
-`no_difference_detected` is only emitted when baseline original is comparable/pass, ported tests pass, and non-zero tests executed.
+Legacy compatibility fields such as `status_detail`, `failure_class_legacy`, `runner_preflight`, `suite_shape`, Maven-specific unit/full fallback fields, and top-level `removed_original_tests` are intentionally omitted from v3.
+
+`result.verdict=no_difference_detected` is only emitted when the selected portable original baseline is comparable/pass, ported tests pass, and non-zero tests executed.
 
 ## Runner support roadmap
 
 Current execution support:
 
 - Maven Surefire/Failsafe (JUnit4/JUnit5/TestNG via Maven runner)
-- Gradle `test` (wrapper or system Gradle)
+- Gradle `Test` tasks, including custom portable tasks such as `integrationTest`, `functionalTest`, and `e2e`
 
 Current preflight-only / planned:
 
-- Node/Jest and non-Java runners: detected as unsupported today, surfaced via `runner_preflight.missing_capabilities`.
+- Node/Jest and non-Java runners: detected as unsupported today, surfaced via `diagnostics.runner.missing_capabilities`.

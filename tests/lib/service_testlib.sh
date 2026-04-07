@@ -208,10 +208,12 @@ case "${TPT_ADAPTER_SCENARIO:-}" in
     case "${PWD:-}" in
       *original-baseline-repo|*generated-baseline-repo)
         if [[ "$*" == *"-DskipITs"* ]]; then
-          echo "Connection refused"
-          exit 1
+          cat > target/surefire-reports/TEST-fake.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="ok"/></testsuite>
+XML
+          exit 0
         fi
-        echo "Non-resolvable parent POM"
+        echo "Connection refused"
         exit 1
         ;;
     esac

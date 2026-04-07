@@ -9,6 +9,22 @@ TOOL_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 source "${SCRIPT_DIR}/lib/testlib.sh"
 # shellcheck source=/dev/null
 source "${TOOL_ROOT}/scripts/lib/tp_runner.sh"
+# shellcheck source=/dev/null
+source "${TOOL_ROOT}/scripts/lib/tp_copy.sh"
+
+prepare_scope_env() {
+  local root="$1"
+  TP_LOG_DIR="${root}/logs"
+  TP_SUMMARY_DIR="${root}/summary"
+  TP_TEST_SCOPE_JSON_PATH="${TP_SUMMARY_DIR}/test-scope.json"
+  TP_TEST_SCOPE_PROBES_FILE="${TP_SUMMARY_DIR}/test-scope-probes.jsonl"
+  TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-commands.tsv"
+  TP_TEST_SCOPE_EXCLUDED_TESTS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-tests.tsv"
+  TP_MAVEN_LOCAL_REPO="${root}/workspace/.m2/repository"
+  TP_GRADLE_USER_HOME="${root}/workspace/.gradle"
+  TP_TMP_DIR="${root}/workspace/tmp"
+  mkdir -p "$TP_LOG_DIR" "$TP_SUMMARY_DIR" "${root}/workspace"
+}
 
 case_maven_uses_workspace_local_repo() {
   local tmp repo fake_bin log args_file local_repo
@@ -274,6 +290,292 @@ LOG
   tpt_assert_eq "unknown" "$(tp_classify_test_failure_log "$log")" "generic error lines should not be forced into compatibility-build"
 }
 
+case_portable_scope_maven_selects_broad_when_it_passes() {
+  local tmp repo fake_bin log args_file
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/portable.log"
+  args_file="${tmp}/mvn-args.txt"
+
+  prepare_scope_env "$tmp"
+  mkdir -p "$repo" "$fake_bin"
+  echo "<project/>" > "${repo}/pom.xml"
+
+  cat > "${fake_bin}/mvn" <<'MVN'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TPT_MVN_ARGS_FILE"
+if [[ "$*" == *"-DskipITs"* ]]; then
+  echo "narrow command should not run" >&2
+  exit 99
+fi
+mkdir -p target/surefire-reports
+cat > target/surefire-reports/TEST-fake.xml <<'XML'
+<testsuite tests="2" failures="0" errors="0"><testcase classname="fake" name="one"/><testcase classname="fake" name="two"/></testsuite>
+XML
+MVN
+  chmod +x "${fake_bin}/mvn"
+
+  export TPT_MVN_ARGS_FILE="$args_file"
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  tp_select_and_run_portable_scope "$repo" "$log"
+
+  tpt_assert_eq "selected" "$TP_TEST_SCOPE_STATUS" "portable scope should be selected"
+  tpt_assert_eq "broad" "$TP_TEST_SCOPE_SELECTED_MAVEN_MODE" "passing Maven broad command should be selected"
+  tpt_assert_eq "mvn test" "$TP_TEST_SCOPE_SELECTED_COMMANDS_CSV" "selected command should be broad mvn test"
+  tpt_assert_eq "portable-tests" "$TP_BASELINE_LAST_STRATEGY" "baseline strategy should be portable-tests"
+  tpt_assert_eq "pass" "$TP_BASELINE_LAST_STATUS" "portable baseline should pass"
+  tp_collect_execution_summary "$repo" "$log" "TPT_FINAL"
+  tpt_assert_eq "2" "$TPT_FINAL_TESTS_EXECUTED" "portable baseline should record execution count"
+  tpt_assert_not_file_contains "$args_file" "-DskipITs" "narrow Maven flags should not run when broad passes"
+}
+
+case_portable_scope_maven_falls_back_to_narrow_after_environment_failure() {
+  local tmp repo fake_bin log args_file
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/portable.log"
+  args_file="${tmp}/mvn-args.txt"
+
+  prepare_scope_env "$tmp"
+  mkdir -p "$repo" "$fake_bin"
+  echo "<project/>" > "${repo}/pom.xml"
+
+  cat > "${fake_bin}/mvn" <<'MVN'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TPT_MVN_ARGS_FILE"
+if [[ "$*" != *"-DskipITs"* ]]; then
+  echo "Connection refused"
+  exit 1
+fi
+mkdir -p target/surefire-reports
+cat > target/surefire-reports/TEST-fake.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="unit"/></testsuite>
+XML
+MVN
+  chmod +x "${fake_bin}/mvn"
+
+  export TPT_MVN_ARGS_FILE="$args_file"
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  tp_select_and_run_portable_scope "$repo" "$log"
+
+  tpt_assert_eq "selected" "$TP_TEST_SCOPE_STATUS" "portable scope should be selected after fallback"
+  tpt_assert_eq "narrow" "$TP_TEST_SCOPE_SELECTED_MAVEN_MODE" "Maven narrow command should be selected"
+  tpt_assert_file_contains "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "environment-assumption-failure" "broad Maven env failure should be excluded"
+  tpt_assert_file_contains "$args_file" "-DskipITs" "narrow Maven flags should run after env failure"
+  tpt_assert_eq "pass" "$TP_BASELINE_LAST_STATUS" "narrow portable baseline should pass"
+}
+
+case_portable_scope_maven_skips_when_no_portable_signal_exists() {
+  local tmp repo fake_bin log rc
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/portable.log"
+
+  prepare_scope_env "$tmp"
+  mkdir -p "$repo" "$fake_bin"
+  echo "<project/>" > "${repo}/pom.xml"
+
+  cat > "${fake_bin}/mvn" <<'MVN'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" != *"-DskipITs"* ]]; then
+  echo "Connection refused"
+  exit 1
+fi
+printf 'BUILD SUCCESS with no tests\n'
+exit 0
+MVN
+  chmod +x "${fake_bin}/mvn"
+
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  if tp_select_and_run_portable_scope "$repo" "$log"; then
+    echo "expected no portable scope to be skipped" >&2
+    return 1
+  else
+    rc=$?
+  fi
+
+  tpt_assert_eq "2" "$rc" "no portable signal should return skip code"
+  tpt_assert_eq "none" "$TP_TEST_SCOPE_STATUS" "scope should be marked none"
+  tpt_assert_eq "no-portable-test-signal" "$TP_TEST_SCOPE_SELECTION_REASON" "scope should explain no portable signal"
+  tpt_assert_file_contains "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "mvn test" "broad Maven command should be recorded as excluded"
+}
+
+case_portable_scope_gradle_selects_multiple_passing_tasks() {
+  local tmp repo fake_bin log args_file
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/portable.log"
+  args_file="${tmp}/gradle-args.txt"
+
+  prepare_scope_env "$tmp"
+  mkdir -p "$repo/src/test/java" "$repo/src/integrationTest/java" "$fake_bin"
+  echo "tasks.register('integrationTest', Test)" > "${repo}/build.gradle"
+
+  cat > "${fake_bin}/gradle" <<'GRADLE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TPT_GRADLE_ARGS_FILE"
+for task in "$@"; do
+  case "$task" in
+    test)
+      mkdir -p build/test-results/test
+      cat > build/test-results/test/TEST-test.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="unit"/></testsuite>
+XML
+      ;;
+    integrationTest)
+      mkdir -p build/test-results/integrationTest
+      cat > build/test-results/integrationTest/TEST-integration.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="integration"/></testsuite>
+XML
+      ;;
+  esac
+done
+GRADLE
+  chmod +x "${fake_bin}/gradle"
+
+  export TPT_GRADLE_ARGS_FILE="$args_file"
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  tp_select_and_run_portable_scope "$repo" "$log"
+
+  tpt_assert_eq "selected" "$TP_TEST_SCOPE_STATUS" "passing Gradle tasks should select a portable scope"
+  tpt_assert_eq "test:integrationTest" "$TP_TEST_SCOPE_SELECTED_TASKS_CSV" "both passing Gradle test tasks should be selected"
+  tp_collect_execution_summary "$repo" "$log" "TPT_FINAL"
+  tpt_assert_eq "2" "$TPT_FINAL_TESTS_EXECUTED" "final selected Gradle run should execute both suites"
+}
+
+case_portable_scope_gradle_excludes_environment_task_but_keeps_unit_task() {
+  local tmp repo fake_bin log args_file
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/portable.log"
+  args_file="${tmp}/gradle-args.txt"
+
+  prepare_scope_env "$tmp"
+  mkdir -p "$repo/src/test/java" "$repo/src/integrationTest/java" "$fake_bin"
+  echo "tasks.register('integrationTest', Test)" > "${repo}/build.gradle"
+
+  cat > "${fake_bin}/gradle" <<'GRADLE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> "$TPT_GRADLE_ARGS_FILE"
+case " $* " in
+  *" integrationTest "*)
+    echo "Cannot connect to the Docker daemon"
+    exit 1
+    ;;
+esac
+mkdir -p build/test-results/test
+cat > build/test-results/test/TEST-test.xml <<'XML'
+<testsuite tests="1" failures="0" errors="0"><testcase classname="fake" name="unit"/></testsuite>
+XML
+GRADLE
+  chmod +x "${fake_bin}/gradle"
+
+  export TPT_GRADLE_ARGS_FILE="$args_file"
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  tp_select_and_run_portable_scope "$repo" "$log"
+
+  tpt_assert_eq "selected" "$TP_TEST_SCOPE_STATUS" "unit Gradle task should keep portable scope selected"
+  tpt_assert_eq "test" "$TP_TEST_SCOPE_SELECTED_TASKS_CSV" "environment-failing Gradle task should be excluded"
+  tpt_assert_file_contains "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "integrationTest" "excluded Gradle task should be recorded"
+  tpt_assert_file_contains "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "environment-assumption-failure" "excluded Gradle task should preserve reason"
+  tpt_assert_eq "pass" "$TP_BASELINE_LAST_STATUS" "final selected Gradle run should pass"
+}
+
+case_gradle_task_detection_does_not_treat_git_or_bit_as_it_tasks() {
+  local tmp repo tasks
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+
+  mkdir -p "$repo/src/git/java" "$repo/src/bit/java" "$repo/src/it/java" "$repo/src/smokeIT/java"
+  cat > "${repo}/build.gradle" <<'GRADLE'
+plugins {}
+// The word it in prose should not create an it task.
+tasks.register('integrationTest', Test)
+GRADLE
+
+  tasks="$(tp_detect_gradle_test_tasks "$repo")"
+
+  printf '%s\n' "$tasks" | grep -qx "test" || {
+    echo "ASSERT failed: expected default test task" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "it" || {
+    echo "ASSERT failed: expected explicit it source set" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "smokeIT" || {
+    echo "ASSERT failed: expected smokeIT source set" >&2
+    return 1
+  }
+  printf '%s\n' "$tasks" | grep -qx "integrationTest" || {
+    echo "ASSERT failed: expected integrationTest build task" >&2
+    return 1
+  }
+  if printf '%s\n' "$tasks" | grep -Eqx 'git|bit'; then
+    echo "ASSERT failed: git/bit source sets must not be detected as test tasks: ${tasks}" >&2
+    return 1
+  fi
+}
+
+case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
+  local tmp repo snapshot
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  snapshot="${tmp}/snapshot"
+
+  prepare_scope_env "$tmp"
+  TP_ORIGINAL_EFFECTIVE_PATH="$repo"
+  TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
+  TP_TEST_SCOPE_RUNNER="maven"
+  TP_TEST_SCOPE_SELECTED_MAVEN_MODE="broad"
+  TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
+
+  mkdir -p \
+    "$repo/src/test/java" \
+    "$repo/src/git/java" \
+    "$repo/src/bit/java" \
+    "$repo/src/smokeIT/java" \
+    "$repo/node_modules/pkg/src/test/java"
+  echo "class UnitTest {}" > "$repo/src/test/java/UnitTest.java"
+  echo "class GitHelper {}" > "$repo/src/git/java/GitHelper.java"
+  echo "class BitHelper {}" > "$repo/src/bit/java/BitHelper.java"
+  echo "class SmokeIT {}" > "$repo/src/smokeIT/java/SmokeIT.java"
+  echo "class VendorTest {}" > "$repo/node_modules/pkg/src/test/java/VendorTest.java"
+
+  tp_snapshot_original_tests
+
+  tpt_assert_file_exists "$snapshot/src/test/java/UnitTest.java" "snapshot should include standard tests"
+  tpt_assert_file_exists "$snapshot/src/smokeIT/java/SmokeIT.java" "snapshot should include explicit IT source sets"
+  if [[ -e "$snapshot/src/git/java/GitHelper.java" || -e "$snapshot/src/bit/java/BitHelper.java" ]]; then
+    echo "ASSERT failed: git/bit source sets must not be snapshotted as tests" >&2
+    return 1
+  fi
+  if [[ -e "$snapshot/node_modules/pkg/src/test/java/VendorTest.java" ]]; then
+    echo "ASSERT failed: pruned dependency trees must not be snapshotted" >&2
+    return 1
+  fi
+}
+
 tpt_run_case "maven uses workspace local repo" case_maven_uses_workspace_local_repo
 tpt_run_case "gradle wrapper invocation unchanged" case_gradle_wrapper_invocation_unchanged
 tpt_run_case "gradle invocation unchanged" case_gradle_invocation_unchanged
@@ -282,5 +584,12 @@ tpt_run_case "maven baseline unit-first skips full fallback on success" case_mav
 tpt_run_case "maven baseline fallback classifies environmental noise" case_maven_baseline_falls_back_and_classifies_environmental_noise
 tpt_run_case "maven baseline fallback recovers from unit-only failure" case_maven_baseline_fallback_passes_after_unit_only_failure
 tpt_run_case "classifier avoids generic error compatibility overfit" case_classifier_avoids_generic_error_as_compatibility
+tpt_run_case "portable scope Maven selects broad passing command" case_portable_scope_maven_selects_broad_when_it_passes
+tpt_run_case "portable scope Maven falls back to narrow command" case_portable_scope_maven_falls_back_to_narrow_after_environment_failure
+tpt_run_case "portable scope Maven skips when no signal exists" case_portable_scope_maven_skips_when_no_portable_signal_exists
+tpt_run_case "portable scope Gradle selects multiple passing tasks" case_portable_scope_gradle_selects_multiple_passing_tasks
+tpt_run_case "portable scope Gradle excludes environment task" case_portable_scope_gradle_excludes_environment_task_but_keeps_unit_task
+tpt_run_case "gradle task detection avoids false it suffixes" case_gradle_task_detection_does_not_treat_git_or_bit_as_it_tasks
+tpt_run_case "snapshot avoids false it suffixes and pruned trees" case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees
 
 tpt_finish_suite

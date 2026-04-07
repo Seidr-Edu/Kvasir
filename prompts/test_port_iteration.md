@@ -1,4 +1,4 @@
-Continue adapting tests as a behavioral equivalence probe against the generated repository implementation.
+Continue adapting the selected portable test scope as a behavioral equivalence probe against the generated repository implementation.
 
 Hard constraints:
 - Your writable working directory is the generated evaluation repository only.
@@ -7,10 +7,11 @@ Hard constraints:
 - Do not modify production code, build files, wrappers, scripts, docs, or config outside tests.
 - Do not weaken assertions or rewrite expected behavior solely to make the suite pass.
 - Do not delete/disable failing tests just to remove evidence of behavioral differences.
+- Do not fake or stub away environment-dependent behavior just to make excluded integration/runtime assumptions pass.
 - Preserve as many original tests as possible; removal is allowed only for truly unportable tests or missing target behavior.
 - If any original test file is removed, add/update `./completion/proof/logs/test-port-removed-tests.tsv` with:
   `<repo-relative-test-path>\t<category>\t<reason>`
-- Allowed manifest categories: `unportable`, `missing-target-feature`.
+- Allowed manifest categories: `unportable`, `missing-target-feature`, `generated-layout-mismatch`, `unsupported-runtime-assumption`.
 
 Use this failure summary:
 ${FAILURE_SUMMARY}
