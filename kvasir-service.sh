@@ -32,8 +32,8 @@ Environment:
   KVASIR_GENERATED_SUBDIR                Optional
   KVASIR_MAX_ITER                        Optional non-negative integer
   KVASIR_WRITE_SCOPE_IGNORE_PREFIXES     Optional colon-separated repo-relative prefixes
-  KVASIR_STRICT_WRITE_SCOPE_OVERRIDES    Optional (default: true). When true, reject external write-scope overrides.
-  KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES     Optional (default: false). Set true to allow overrides when strict mode is enabled.
+  KVASIR_STRICT_WRITE_SCOPE_OVERRIDES    Optional (default: true). When true, reject env write-scope overrides.
+  KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES     Optional (default: false). Set true to allow env overrides when strict mode is enabled.
 
 Provider mounts (for adapter=codex):
   Read-only: /opt/provider/bin
@@ -616,8 +616,8 @@ kvasir_service_main() {
   esac
 
   if [[ "$strict_write_scope_overrides" == "true" && "$allow_write_scope_overrides" != "true" ]]; then
-    if [[ -n "$manifest_write_scope_prefixes" || "${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES+x}" == "x" ]]; then
-      TP_POLICY_REJECTED_OVERRIDES_CSV="${manifest_write_scope_prefixes}:${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES:-}"
+    if [[ "${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES+x}" == "x" ]]; then
+      TP_POLICY_REJECTED_OVERRIDES_CSV="${KVASIR_WRITE_SCOPE_IGNORE_PREFIXES:-}"
       kvasir_service_apply_failure "invalid-service-config" "policy_override_rejected"
       if ! kvasir_service_write_reports_or_fail; then
         return 1

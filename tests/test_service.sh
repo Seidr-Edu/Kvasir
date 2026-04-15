@@ -184,8 +184,7 @@ YAML
   rc="$(run_service_case "$tmp" "$log_path" \
     KVASIR_ORIGINAL_REPO="$original_repo" \
     KVASIR_GENERATED_REPO="$generated_repo" \
-    KVASIR_RUN_DIR="$run_dir" \
-    KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES="true")"
+    KVASIR_RUN_DIR="$run_dir")"
 
   tpt_assert_eq "0" "$rc" "manifest-driven service execution should exit 0"
   tpt_assert_file_exists "$json_path" "manifest-driven service must emit json report"
@@ -204,7 +203,7 @@ if "./custom/cache/" not in ignored:
 PY
 }
 
-case_manifest_override_rejected_in_strict_mode() {
+case_env_override_rejected_in_strict_mode() {
   local tmp original_repo generated_repo run_dir log_path json_path manifest_path rc
   tmp="$(tpt_mktemp_dir)"
   setup_fake_tools "$tmp"
@@ -219,18 +218,50 @@ case_manifest_override_rejected_in_strict_mode() {
   cat > "$manifest_path" <<'YAML'
 version: 1
 adapter: codex
-write_scope_ignore_prefixes:
-  - custom/cache
 YAML
 
   rc="$(run_service_case "$tmp" "$log_path" \
     KVASIR_ORIGINAL_REPO="$original_repo" \
     KVASIR_GENERATED_REPO="$generated_repo" \
-    KVASIR_RUN_DIR="$run_dir")"
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_WRITE_SCOPE_IGNORE_PREFIXES="custom/cache")"
 
-  tpt_assert_eq "1" "$rc" "strict mode must reject external write-scope overrides"
+  tpt_assert_eq "1" "$rc" "strict mode must reject env write-scope overrides"
   tpt_assert_file_exists "$json_path" "strict override rejection must still emit json report"
   assert_report_fields "$json_path" "skipped" "invalid-service-config" "policy_override_rejected" "skipped"
+}
+
+case_env_override_allowed_when_explicitly_enabled() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex" \
+    KVASIR_WRITE_SCOPE_IGNORE_PREFIXES="custom/cache" \
+    KVASIR_ALLOW_WRITE_SCOPE_OVERRIDES="true")"
+
+  tpt_assert_eq "0" "$rc" "explicitly allowed env overrides should pass"
+  tpt_assert_file_exists "$json_path" "allowed env override must emit json report"
+  python3 - <<'PY' "$json_path"
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    obj = json.load(f)
+
+ignored = obj.get("diagnostics", {}).get("write_scope", {}).get("ignored_prefixes", [])
+if "./custom/cache/" not in ignored:
+    raise SystemExit(f"expected custom env override prefix, got {ignored!r}")
+PY
 }
 
 case_env_overrides_manifest_values() {
@@ -570,7 +601,8 @@ case_non_writable_logs_dir_still_emits_report() {
 tpt_run_case "env-only service startup passes" case_env_only_startup_passes
 tpt_run_case "codex exec uses container-safe flags" case_codex_exec_uses_container_safe_flags
 tpt_run_case "manifest-driven service startup passes" case_manifest_driven_startup_passes
-tpt_run_case "strict mode rejects write-scope overrides" case_manifest_override_rejected_in_strict_mode
+tpt_run_case "strict mode rejects env write-scope overrides" case_env_override_rejected_in_strict_mode
+tpt_run_case "env write-scope overrides work when explicitly allowed" case_env_override_allowed_when_explicitly_enabled
 tpt_run_case "env overrides manifest values" case_env_overrides_manifest_values
 tpt_run_case "build hints select subdir and surface hint metadata" case_build_hints_select_subdir_and_surface_hint_metadata
 tpt_run_case "invalid manifest still emits report" case_invalid_manifest_still_emits_report
