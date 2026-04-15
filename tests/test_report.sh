@@ -132,6 +132,10 @@ TSV
       "documented": true
     }
   ],
+  "documented_removed_test_count": 1,
+  "removed_tests_by_category": {
+    "unportable": 1
+  },
   "undocumented_removed_test_count": 0,
   "junit_report_count": 1,
   "junit_report_files": [
@@ -150,13 +154,8 @@ JSON
   "selected_tasks": [],
   "excluded_commands": [],
   "included_test_file_count": 2,
-  "excluded_test_file_count": 1,
-  "excluded_tests": [
-    {
-      "path": "./src/test/java/OriginalIT.java",
-      "reason": "environment-scope-excluded"
-    }
-  ],
+  "excluded_test_file_count": 0,
+  "excluded_tests": [],
   "probes": []
 }
 JSON
@@ -199,7 +198,7 @@ if "policy" in obj["diagnostics"]["write_scope"]:
 scope = obj.get("test_scope", {})
 if scope.get("mode") != "portable-tests" or scope.get("selected_commands") != ["mvn test"]:
     raise SystemExit(f"unexpected test scope: {scope}")
-if scope.get("included_test_file_count") != 2 or scope.get("excluded_test_file_count") != 1:
+if scope.get("included_test_file_count") != 2 or scope.get("excluded_test_file_count") != 0:
     raise SystemExit(f"unexpected scope counts: {scope}")
 shape = obj.get("evidence", {}).get("retention", {})
 if shape.get("retained_original_test_file_count") != 1:
@@ -211,6 +210,10 @@ if shape.get("retention_ratio") != 0.5:
 removed = shape.get("removed_tests", [])
 if len(removed) != 1 or removed[0].get("path") != "./src/test/java/OriginalRemovedTest.java":
     raise SystemExit(f"unexpected removed_original_tests: {removed}")
+if shape.get("documented_removed_test_count") != 1:
+    raise SystemExit(f"unexpected documented removed count: {shape}")
+if shape.get("removed_tests_by_category") != {"unportable": 1}:
+    raise SystemExit(f"unexpected removed test categories: {shape}")
 for removed_field in ("policy", "documented_removals_required", "manifest_rel_path"):
     if removed_field in shape:
         raise SystemExit(f"retention policy plumbing should be absent: {shape}")
@@ -233,9 +236,11 @@ if artifacts.get("ported_repo") is None:
 PY
 
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Schema: kvasir.test_port.v3" "summary should mention v3 schema"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Test scope" "summary should mention portable test scope"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Portable test files included/excluded" "summary should include scope counts"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Removed original tests" "summary should include removed-test count"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Original probe scope" "summary should mention probe diagnostics"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Full-suite snapshot files included/excluded" "summary should include full-suite snapshot counts"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Documented removed tests" "summary should include documented removal count"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Removed original tests by category" "summary should include removal categories"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Evidence interpretation" "summary should characterize evidence quality"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Baseline generated" "summary should include generated baseline"
 }
 

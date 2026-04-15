@@ -346,8 +346,8 @@ with open(sys.argv[1], "r", encoding="utf-8") as f:
     obj = json.load(f)
 if obj.get("result", {}).get("status") != "skipped":
     raise SystemExit(f"expected skipped status, got {obj.get('result')}")
-if obj.get("result", {}).get("reason") != "no-portable-test-signal":
-    raise SystemExit(f"expected no-portable-test-signal reason, got {obj.get('result')}")
+if obj.get("result", {}).get("reason") != "no-test-signal":
+    raise SystemExit(f"expected no-test-signal reason, got {obj.get('result')}")
 if obj.get("result", {}).get("verdict") != "no_test_signal":
     raise SystemExit(f"expected no_test_signal verdict, got {obj.get('result')}")
 PY
@@ -457,15 +457,17 @@ if not scope.get("excluded_commands"):
     raise SystemExit(f"expected environment-excluded scope command, got {scope}")
 if scope["excluded_commands"][0].get("failure_class") != "environment-assumption-failure":
     raise SystemExit(f"expected environment-assumption-failure exclusion, got {scope}")
+if scope.get("excluded_test_file_count") != 0:
+    raise SystemExit(f"expected full-suite snapshot to exclude zero tests, got {scope}")
 excluded_tests = scope.get("excluded_tests", [])
-if not any(item.get("path") == "./src/test/java/DatabaseIT.java" for item in excluded_tests):
-    raise SystemExit(f"expected DatabaseIT.java to be excluded from narrow portable scope, got {scope}")
+if any(item.get("path") == "./src/test/java/DatabaseIT.java" for item in excluded_tests):
+    raise SystemExit(f"expected DatabaseIT.java to stay in the full-suite snapshot, got {scope}")
 if baseline.get("failure", {}).get("type") not in ("", None):
     raise SystemExit(f"expected baseline environmental-noise failure type, got {baseline}")
 PY
 
-  if [[ -e "${run_dir}/artifacts/ported-tests-repo/src/test/java/DatabaseIT.java" ]]; then
-    echo "ASSERT failed: environment-excluded test must not be ported" >&2
+  if [[ ! -e "${run_dir}/artifacts/ported-tests-repo/src/test/java/DatabaseIT.java" ]]; then
+    echo "ASSERT failed: DatabaseIT.java should be attempted in the promoted full-suite ported repo" >&2
     return 1
   fi
 }

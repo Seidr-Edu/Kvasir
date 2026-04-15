@@ -94,7 +94,14 @@ def is_allowed_test_rel(rel):
         return True
     if rel.startswith("./src/"):
         parts = rel.split("/", 4)
-        return len(parts) > 2 and "Test" in parts[2]
+        if len(parts) <= 2:
+            return False
+        source_set = parts[2]
+        return bool(
+            re.search(r"(test|spec|integration|functional|e2e|acceptance|verification)", source_set, re.I)
+            or source_set.lower() == "it"
+            or re.search(r"(^[iI][tT][A-Z0-9_].*|IT$)", source_set)
+        )
     return False
 
 
@@ -260,6 +267,8 @@ manifest_rows, malformed_manifest_rows = parse_removal_manifest(manifest_path)
 
 removed_entries = []
 undocumented = []
+documented_removed_count = 0
+removed_tests_by_category = {}
 for rel in removed:
     manifest_row = manifest_rows.get(rel)
     category = ""
@@ -283,6 +292,9 @@ for rel in removed:
     removed_entries.append(row)
     if not documented:
         undocumented.append(row)
+    else:
+        documented_removed_count += 1
+        removed_tests_by_category[category] = removed_tests_by_category.get(category, 0) + 1
 
 junit = collect_junit_stats(repo_dir)
 
@@ -305,6 +317,8 @@ obj = {
     "removed_original_tests": removed_entries,
     "undocumented_removed_original_tests": undocumented,
     "undocumented_removed_test_count": len(undocumented),
+    "documented_removed_test_count": documented_removed_count,
+    "removed_tests_by_category": removed_tests_by_category,
     "removal_manifest_path": manifest_path,
     "removal_manifest_missing": not os.path.isfile(manifest_path),
     "removal_manifest_malformed_rows": malformed_manifest_rows,

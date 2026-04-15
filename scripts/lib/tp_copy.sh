@@ -54,17 +54,15 @@ tp_snapshot_original_tests() {
 
   local scope_snapshot_assignments
   if ! scope_snapshot_assignments="$(python3 - <<'PY' \
-    "$TP_ORIGINAL_EFFECTIVE_PATH" "$TP_ORIGINAL_TESTS_SNAPSHOT" "${TP_TEST_SCOPE_RUNNER:-unknown}" "${TP_TEST_SCOPE_SELECTED_MAVEN_MODE:-}" "${TP_TEST_SCOPE_SELECTED_TASKS_CSV:-}" "${TP_TEST_SCOPE_EXCLUDED_TESTS_FILE:-}"
+    "$TP_ORIGINAL_EFFECTIVE_PATH" "$TP_ORIGINAL_TESTS_SNAPSHOT"
 import os
 import re
 import shlex
 import shutil
 import sys
 
-source, target, runner, maven_mode, gradle_tasks_csv, excluded_tests_file = sys.argv[1:]
-selected_tasks = {task for task in gradle_tasks_csv.split(":") if task}
+source, target = sys.argv[1:]
 included = 0
-excluded = 0
 
 
 def relpath(path):
@@ -84,38 +82,6 @@ def is_test_rel(rel):
                 or re.search(r"(^[iI][tT][A-Z0-9_].*|IT$)", source_set)
             )
     return False
-
-
-def is_integration_like(rel):
-    parts = rel.lower().split("/")
-    basename = parts[-1]
-    if basename.endswith("it.java") or "integrationtest" in basename:
-        return True
-    return any(part in {"it", "integration", "integrationtest", "functional", "functionaltest", "e2e", "e2etest", "acceptance", "acceptancetest"} for part in parts)
-
-
-def include_for_gradle(rel):
-    if "test" in selected_tasks and rel.startswith(("src/test/", "test/", "tests/")):
-        return True
-    if rel.startswith("src/"):
-        parts = rel.split("/", 2)
-        if len(parts) >= 2 and parts[1] in selected_tasks:
-            return True
-    return False
-
-
-def include_file(rel):
-    if not is_test_rel(rel):
-        return False, "not-test-file"
-    if runner == "maven":
-        if maven_mode == "narrow" and is_integration_like(rel):
-            return False, "environment-scope-excluded"
-        return True, ""
-    if runner in {"gradle", "gradle-wrapper"}:
-        if include_for_gradle(rel):
-            return True, ""
-        return False, "gradle-task-not-selected"
-    return True, ""
 
 
 PRUNED_DIR_NAMES = {
@@ -139,31 +105,20 @@ PRUNED_DIR_NAMES = {
     "vendor",
     "venv",
 }
-
-excluded_rows = []
 for base, dirs, files in os.walk(source):
     dirs[:] = [d for d in dirs if d not in PRUNED_DIR_NAMES]
     for name in files:
         src = os.path.join(base, name)
         rel = relpath(src)
-        keep, reason = include_file(rel)
-        if keep:
-            dst = os.path.join(target, rel)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copy2(src, dst)
-            included += 1
-        elif is_test_rel(rel):
-            excluded += 1
-            excluded_rows.append((f"./{rel}", reason))
-
-if excluded_tests_file:
-    os.makedirs(os.path.dirname(excluded_tests_file), exist_ok=True)
-    with open(excluded_tests_file, "w", encoding="utf-8") as f:
-        for rel, reason in excluded_rows:
-            f.write(f"{rel}\t{reason}\n")
+        if not is_test_rel(rel):
+            continue
+        dst = os.path.join(target, rel)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copy2(src, dst)
+        included += 1
 
 print(f"TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT={shlex.quote(str(included))}")
-print(f"TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT={shlex.quote(str(excluded))}")
+print("TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT=0")
 PY
   )"; then
     return 1
