@@ -430,10 +430,15 @@ tp_run_gradle_test() {
   local repo="$1"
   local log_file="$2"
   local runner="$3"
-  local test_task
+  local -a tasks=()
+  local task
 
-  test_task="$(tp_detect_gradle_test_task "$repo")"
-  tp_run_gradle_test_tasks "$repo" "$log_file" "$runner" "$test_task"
+  while IFS= read -r task; do
+    [[ -n "$task" ]] || continue
+    tasks+=("$task")
+  done < <(tp_detect_gradle_test_tasks "$repo")
+
+  tp_run_gradle_test_tasks "$repo" "$log_file" "$runner" "${tasks[@]}"
 }
 
 tp_run_gradle_test_tasks() {
@@ -510,15 +515,8 @@ tp_run_tests() {
 
   set +e
   case "$runner" in
-    maven|gradle-wrapper|gradle)
-      if [[ "${TP_TEST_SCOPE_STATUS:-}" == "selected" ]]; then
-        tp_run_selected_portable_tests "$repo" "$log_file"
-      elif [[ "$runner" == "maven" ]]; then
-        tp_run_maven_test "$repo" "$log_file" test
-      else
-        tp_run_gradle_test "$repo" "$log_file" "$runner"
-      fi
-      ;;
+    maven) tp_run_maven_test "$repo" "$log_file" test ;;
+    gradle-wrapper|gradle) tp_run_gradle_test "$repo" "$log_file" "$runner" ;;
     *)
       echo "unsupported test runner" >"$log_file"
       tp_restore_errexit "$had_errexit"
@@ -1034,7 +1032,7 @@ tp_select_and_run_portable_scope() {
   fi
 
   tp_clean_junit_outputs "$repo"
-  tp_run_tests "$repo" "$log_file"
+  tp_run_selected_portable_tests "$repo" "$log_file"
   rc=$?
   tp_set_baseline_last_from_test_run "$rc" "$log_file"
   return "$rc"
@@ -1068,16 +1066,6 @@ tp_run_baseline_tests() {
   TP_BASELINE_LAST_FAILURE_PHASE=""
   TP_BASELINE_LAST_FAILURE_SUBCLASS=""
   TP_BASELINE_LAST_FAILURE_FIRST_LINE=""
-
-  if [[ "${TP_TEST_SCOPE_STATUS:-}" == "selected" ]]; then
-    TP_BASELINE_LAST_STRATEGY="portable-tests"
-    set +e
-    tp_run_tests "$repo" "$log_file"
-    rc=$?
-    tp_set_baseline_last_from_test_run "$rc" "$log_file"
-    tp_restore_errexit "$had_errexit"
-    return "$rc"
-  fi
 
   set +e
   case "$runner" in

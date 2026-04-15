@@ -315,6 +315,10 @@ removed_original_tests = evidence_data.get("removed_original_tests")
 if not isinstance(removed_original_tests, list):
     removed_original_tests = []
 undocumented_removed_test_count = to_int(evidence_data.get("undocumented_removed_test_count"), 0)
+documented_removed_test_count = to_int(evidence_data.get("documented_removed_test_count"), 0)
+removed_tests_by_category = evidence_data.get("removed_tests_by_category")
+if not isinstance(removed_tests_by_category, dict):
+    removed_tests_by_category = {}
 behavioral_evidence = collect_junit_failing_cases(ported_repo_dir)
 if "junit_report_count" in evidence_data:
     behavioral_evidence["junit_report_count"] = to_int(evidence_data.get("junit_report_count"), behavioral_evidence.get("junit_report_count", 0))
@@ -469,6 +473,8 @@ obj = {
             "retained_unchanged_count": retained_unchanged_count,
             "assertion_line_change_count": assertion_line_change_count,
             "undocumented_removed_test_count": undocumented_removed_test_count,
+            "documented_removed_test_count": documented_removed_test_count,
+            "removed_tests_by_category": removed_tests_by_category,
             "removed_tests": removed_original_tests,
         },
     },
@@ -518,6 +524,31 @@ def summarize_reasons(rows):
         return "<none>"
     return ", ".join(f"{reason}={count}" for reason, count in sorted(counts.items()))
 
+
+def summarize_category_counts(counts):
+    if not isinstance(counts, dict) or not counts:
+        return "<none>"
+    items = []
+    for key in sorted(counts):
+        items.append(f"{key}={counts[key]}")
+    return ", ".join(items)
+
+
+def evidence_interpretation(result):
+    verdict = result.get("verdict")
+    reason = result.get("verdict_reason") or result.get("reason") or "<none>"
+    if verdict == "difference_detected":
+        return f"behavioral-evidence ({reason})"
+    if verdict == "no_difference_detected":
+        return f"no-behavioral-difference ({reason})"
+    if verdict in {"inconclusive", "no_test_signal"}:
+        return f"inconclusive-or-environmental ({reason})"
+    if verdict == "invalid":
+        return f"invalid-evidence ({reason})"
+    if verdict == "skipped":
+        return f"skipped ({reason})"
+    return f"unknown ({reason})"
+
 summary_lines = [
     "# Test-Port Summary",
     "",
@@ -533,19 +564,22 @@ summary_lines = [
     f"- Reason: {obj['result'].get('reason') or '<none>'}",
     f"- Behavioral verdict: **{obj['result'].get('verdict') or '<none>'}**",
     f"- Behavioral verdict reason: {obj['result'].get('verdict_reason') or '<none>'}",
+    f"- Evidence interpretation: {evidence_interpretation(obj['result'])}",
     f"- Failure classifier: {obj['result'].get('failure_class') or '<none>'}",
-    f"- Test scope: **{obj['test_scope'].get('mode')}** ({obj['test_scope'].get('status')})",
-    f"- Selected test commands: {', '.join(obj['test_scope'].get('selected_commands', [])) if obj['test_scope'].get('selected_commands') else '<none>'}",
-    f"- Excluded test commands: **{len(obj['test_scope'].get('excluded_commands', []))}**",
-    f"- Excluded test command reasons: {summarize_reasons(obj['test_scope'].get('excluded_commands', []))}",
-    f"- Portable test files included/excluded: **{obj['test_scope'].get('included_test_file_count', 0)}/{obj['test_scope'].get('excluded_test_file_count', 0)}**",
-    f"- Excluded test file reasons: {summarize_reasons(obj['test_scope'].get('excluded_tests', []))}",
+    f"- Original probe scope: **{obj['test_scope'].get('mode')}** ({obj['test_scope'].get('status')})",
+    f"- Probe-selected test commands: {', '.join(obj['test_scope'].get('selected_commands', [])) if obj['test_scope'].get('selected_commands') else '<none>'}",
+    f"- Original probe excluded commands: **{len(obj['test_scope'].get('excluded_commands', []))}**",
+    f"- Original probe exclusion reasons: {summarize_reasons(obj['test_scope'].get('excluded_commands', []))}",
+    f"- Full-suite snapshot files included/excluded: **{obj['test_scope'].get('included_test_file_count', 0)}/{obj['test_scope'].get('excluded_test_file_count', 0)}**",
+    f"- Snapshot excluded test reasons: {summarize_reasons(obj['test_scope'].get('excluded_tests', []))}",
     f"- Adapter prereqs OK: **{str(obj['diagnostics'].get('adapter_prereqs_ok', False)).lower()}**",
     f"- Generated repo unchanged: **{str(obj['diagnostics'].get('generated_repo_unchanged', False)).lower()}**",
     f"- Write-scope violations: **{obj['diagnostics']['write_scope']['violation_count']}**",
     f"- Ported repo artifact: {obj['artifacts'].get('ported_repo') or '<none>'}",
     f"- Retained original tests: **{obj['evidence']['retention']['retained_original_test_file_count']}**",
     f"- Removed original tests: **{obj['evidence']['retention']['removed_original_test_file_count']}**",
+    f"- Documented removed tests: **{obj['evidence']['retention']['documented_removed_test_count']}**",
+    f"- Removed original tests by category: {summarize_category_counts(obj['evidence']['retention'].get('removed_tests_by_category'))}",
     f"- Retention ratio: **{obj['evidence']['retention']['retention_ratio'] if obj['evidence']['retention']['retention_ratio'] is not None else '<none>'}**",
     f"- Assertion line changes in retained tests: **{obj['evidence']['retention']['assertion_line_change_count']}**",
     f"- Observed failing test cases: **{obj['evidence']['behavioral']['failing_case_count']} unique / {obj['evidence']['behavioral'].get('failing_case_occurrence_count', obj['evidence']['behavioral']['failing_case_count'])} occurrences**",

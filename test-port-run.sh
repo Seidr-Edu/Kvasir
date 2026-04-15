@@ -337,7 +337,12 @@ tp_execute() {
   TP_WORKSPACE_PREPARED=true
 
   set +e
-  tp_select_and_run_portable_scope_with_build_env "TP_BASELINE_ORIGINAL" "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG"
+  tp_select_portable_test_scope_with_build_env "TP_BASELINE_ORIGINAL" "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG"
+  TP_BASELINE_ORIGINAL_RC=$?
+  set -e
+
+  set +e
+  tp_run_baseline_tests_with_build_env "TP_BASELINE_ORIGINAL" "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG"
   TP_BASELINE_ORIGINAL_RC=$?
   tp_collect_execution_summary "$TP_ORIGINAL_BASELINE_REPO" "$TP_BASELINE_ORIGINAL_LOG" "TP_BASELINE_ORIGINAL"
   TP_BASELINE_ORIGINAL_STATUS="$TP_BASELINE_LAST_STATUS"
@@ -351,27 +356,6 @@ tp_execute() {
   TP_BASELINE_ORIGINAL_FAILURE_SUBCLASS="$TP_BASELINE_LAST_FAILURE_SUBCLASS"
   TP_BASELINE_ORIGINAL_FAILURE_FIRST_LINE="$TP_BASELINE_LAST_FAILURE_FIRST_LINE"
   set -e
-
-  if [[ "${TP_TEST_SCOPE_STATUS:-unselected}" != "selected" ]]; then
-    TP_STATUS="skipped"
-    TP_REASON="${TP_TEST_SCOPE_SELECTION_REASON:-no-portable-test-signal}"
-    TP_STATUS_DETAIL="${TP_REASON//-/_}"
-    return 0
-  fi
-
-  if [[ "${TP_BASELINE_ORIGINAL_RC:-1}" -ne 0 ]]; then
-    TP_STATUS="skipped"
-    TP_REASON="baseline-original-nonzero-exit"
-    TP_STATUS_DETAIL="baseline_original_rc_${TP_BASELINE_ORIGINAL_RC}"
-    return 0
-  fi
-
-  if [[ "${TP_BASELINE_ORIGINAL_TESTS_EXECUTED:-0}" -le 0 ]]; then
-    TP_STATUS="skipped"
-    TP_REASON="no-tests-executed"
-    TP_STATUS_DETAIL="no_tests_executed"
-    return 0
-  fi
 
   if ! tp_snapshot_original_tests; then
     if [[ -d "$TP_ORIGINAL_TESTS_SNAPSHOT" ]] && ! find "$TP_ORIGINAL_TESTS_SNAPSHOT" -type f -print -quit | grep -q .; then

@@ -115,6 +115,38 @@ GRADLE
   tpt_assert_file_contains "$args_file" "test --no-daemon" "plain gradle invocation should remain unchanged"
 }
 
+case_gradle_full_suite_runs_all_detected_test_tasks() {
+  local tmp repo fake_bin log args_file
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  fake_bin="${tmp}/bin"
+  log="${tmp}/gradle.log"
+  args_file="${tmp}/gradle-args.txt"
+
+  mkdir -p "$repo/src/test/java" "$repo/src/integrationTest/java" "$fake_bin"
+  cat > "${repo}/build.gradle" <<'GRADLE'
+plugins {}
+tasks.register('integrationTest', Test)
+GRADLE
+
+  cat > "${fake_bin}/gradle" <<'GRADLE'
+#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" > "$TPT_GRADLE_ARGS_FILE"
+GRADLE
+  chmod +x "${fake_bin}/gradle"
+
+  export TPT_GRADLE_ARGS_FILE="$args_file"
+  PATH="${fake_bin}:$PATH"
+  hash -r
+
+  tp_run_tests "$repo" "$log"
+
+  tpt_assert_file_contains "$args_file" "test" "full-suite Gradle run should include the default test task"
+  tpt_assert_file_contains "$args_file" "integrationTest" "full-suite Gradle run should include detected integration tasks"
+  tpt_assert_file_contains "$args_file" "--no-daemon" "full-suite Gradle run should retain no-daemon"
+}
+
 case_unknown_runner_returns_skipped_code() {
   local tmp repo log rc
   tmp="$(tpt_mktemp_dir)"
@@ -547,16 +579,18 @@ case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
   TP_ORIGINAL_EFFECTIVE_PATH="$repo"
   TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
   TP_TEST_SCOPE_RUNNER="maven"
-  TP_TEST_SCOPE_SELECTED_MAVEN_MODE="broad"
+  TP_TEST_SCOPE_SELECTED_MAVEN_MODE="narrow"
   TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
 
   mkdir -p \
     "$repo/src/test/java" \
+    "$repo/src/it/java" \
     "$repo/src/git/java" \
     "$repo/src/bit/java" \
     "$repo/src/smokeIT/java" \
     "$repo/node_modules/pkg/src/test/java"
   echo "class UnitTest {}" > "$repo/src/test/java/UnitTest.java"
+  echo "class DatabaseIT {}" > "$repo/src/it/java/DatabaseIT.java"
   echo "class GitHelper {}" > "$repo/src/git/java/GitHelper.java"
   echo "class BitHelper {}" > "$repo/src/bit/java/BitHelper.java"
   echo "class SmokeIT {}" > "$repo/src/smokeIT/java/SmokeIT.java"
@@ -565,6 +599,7 @@ case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
   tp_snapshot_original_tests
 
   tpt_assert_file_exists "$snapshot/src/test/java/UnitTest.java" "snapshot should include standard tests"
+  tpt_assert_file_exists "$snapshot/src/it/java/DatabaseIT.java" "snapshot should keep integration-style tests even when the probe chose a narrow scope"
   tpt_assert_file_exists "$snapshot/src/smokeIT/java/SmokeIT.java" "snapshot should include explicit IT source sets"
   if [[ -e "$snapshot/src/git/java/GitHelper.java" || -e "$snapshot/src/bit/java/BitHelper.java" ]]; then
     echo "ASSERT failed: git/bit source sets must not be snapshotted as tests" >&2
@@ -579,6 +614,7 @@ case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
 tpt_run_case "maven uses workspace local repo" case_maven_uses_workspace_local_repo
 tpt_run_case "gradle wrapper invocation unchanged" case_gradle_wrapper_invocation_unchanged
 tpt_run_case "gradle invocation unchanged" case_gradle_invocation_unchanged
+tpt_run_case "gradle full-suite run includes detected integration tasks" case_gradle_full_suite_runs_all_detected_test_tasks
 tpt_run_case "unknown runner returns skip code" case_unknown_runner_returns_skipped_code
 tpt_run_case "maven baseline unit-first skips full fallback on success" case_maven_baseline_uses_unit_first_and_skips_full_on_success
 tpt_run_case "maven baseline fallback classifies environmental noise" case_maven_baseline_falls_back_and_classifies_environmental_noise
