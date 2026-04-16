@@ -86,6 +86,38 @@ tpt_assert_failure() {
   fi
 }
 
+tpt_assert_pid_file_reaped() {
+  local path="$1"
+  local msg="${2:-expected pid file process to be reaped}"
+  if [[ ! -f "$path" ]]; then
+    printf -- 'ASSERT_PID_FILE_REAPED failed: missing pid file\nfile: %s\n' "$path" >&2
+    return 1
+  fi
+  python3 - <<'PY' "$path" "$msg"
+import os
+import sys
+import time
+
+path, msg = sys.argv[1:3]
+with open(path, "r", encoding="utf-8") as f:
+    pid = int(f.read().strip())
+
+deadline = time.time() + 5.0
+while time.time() < deadline:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        raise SystemExit(0)
+    except PermissionError:
+        print(f"ASSERT_PID_FILE_REAPED failed: {msg}\npid: {pid}\npermission denied", file=sys.stderr)
+        raise SystemExit(1)
+    time.sleep(0.1)
+
+print(f"ASSERT_PID_FILE_REAPED failed: {msg}\npid: {pid}", file=sys.stderr)
+raise SystemExit(1)
+PY
+}
+
 tpt_mktemp_dir() {
   mktemp -d "${TMPDIR:-/tmp}/test-port-tests.XXXXXX"
 }

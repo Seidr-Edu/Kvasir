@@ -46,6 +46,9 @@ JAVA
   behavioral-evidence)
     :
     ;;
+  complete-then-hang|hang-before-complete)
+    :
+    ;;
   *)
     ;;
 esac
@@ -102,6 +105,13 @@ increment_call_counter() {
   printf '%s\n' "$current"
 }
 
+record_provider_pid() {
+  local pid_file="$1"
+  if [[ -n "$pid_file" ]]; then
+    printf '%s\n' "$$" > "$pid_file"
+  fi
+}
+
 subcommand="${1:-}"
 case "$subcommand" in
   login)
@@ -135,13 +145,33 @@ case "$subcommand" in
       esac
     done
 
-    if [[ -n "$output_last" ]]; then
-      printf 'fake adapter message\n' > "$output_last"
-    fi
-
     call_no="$(increment_call_counter)"
 
     adapter_mutate_fixture.sh "${TPT_ADAPTER_SCENARIO:-}" "$call_no"
+
+    case "${TPT_ADAPTER_SCENARIO:-}" in
+      complete-then-hang)
+        record_provider_pid "${TPT_CODEX_PID_FILE:-}"
+        if [[ -n "$output_last" ]]; then
+          printf 'fake adapter message\n' > "$output_last"
+        fi
+        printf '%s\n' '{"type":"response.output_text","text":"ok"}'
+        printf '%s\n' '{"type":"turn.completed"}'
+        while true; do
+          sleep 1
+        done
+        ;;
+      hang-before-complete)
+        record_provider_pid "${TPT_CODEX_PID_FILE:-}"
+        while true; do
+          sleep 1
+        done
+        ;;
+    esac
+
+    if [[ -n "$output_last" ]]; then
+      printf 'fake adapter message\n' > "$output_last"
+    fi
 
     printf '%s\n' '{"type":"response.output_text","text":"ok"}'
     exit 0
@@ -152,14 +182,35 @@ printf 'unsupported fake codex invocation\n' >&2
 exit 1
 CODEX
 
-  cat > "${fake_bin}/claude" <<'CLAUDE'
+cat > "${fake_bin}/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 set -euo pipefail
+
+record_provider_pid() {
+  local pid_file="$1"
+  if [[ -n "$pid_file" ]]; then
+    printf '%s\n' "$$" > "$pid_file"
+  fi
+}
 
 if [[ "${1:-}" == "--version" ]]; then
   printf 'claude-fake 1.0.0\n'
   exit 0
 fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dangerously-skip-permissions)
+      shift
+      ;;
+    --print)
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ "${1:-}" == "--print" ]]; then
   call_no_file="${TPT_CLAUDE_CALL_COUNT_FILE:-}"
@@ -173,6 +224,23 @@ if [[ "${1:-}" == "--print" ]]; then
   fi
 
   adapter_mutate_fixture.sh "${TPT_ADAPTER_SCENARIO:-}" "$call_no"
+
+  record_provider_pid "${TPT_CLAUDE_PID_FILE:-}"
+
+  case "${TPT_ADAPTER_SCENARIO:-}" in
+    complete-then-hang)
+      printf 'fake adapter message\n'
+      while true; do
+        sleep 1
+      done
+      ;;
+    hang-before-complete)
+      while true; do
+        sleep 1
+      done
+      ;;
+  esac
+
   printf 'fake adapter message\n'
   exit 0
 fi
