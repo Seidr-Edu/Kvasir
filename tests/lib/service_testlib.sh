@@ -54,6 +54,52 @@ JAVA
 esac
 ADAPTER
 
+  cat > "${fake_bin}/bash" <<'FAKEBASH'
+#!/bin/bash
+set -euo pipefail
+
+REAL_BASH="/bin/bash"
+mode="${TPT_BASH_WRAPPER_MODE:-}"
+target="${1:-}"
+
+extract_run_dir() {
+  local args=("$@")
+  local i
+  for ((i=0; i<${#args[@]}; i++)); do
+    if [[ "${args[$i]}" == "--run-dir" && $((i + 1)) -lt ${#args[@]} ]]; then
+      printf '%s\n' "${args[$((i + 1))]}"
+      return 0
+    fi
+  done
+}
+
+if [[ -z "$mode" || "$target" != */kvasir-run.sh ]]; then
+  exec "$REAL_BASH" "$@"
+fi
+
+run_dir="$(extract_run_dir "$@")"
+
+set +e
+"$REAL_BASH" "$@"
+rc=$?
+set -e
+
+case "$mode" in
+  kvasir-run-nonzero-after-report)
+    exit 17
+    ;;
+  kvasir-run-drop-report-after-success)
+    if [[ -n "$run_dir" ]]; then
+      rm -f "${run_dir}/outputs/test_port.json"
+    fi
+    exit "$rc"
+    ;;
+  *)
+    exit "$rc"
+    ;;
+esac
+FAKEBASH
+
   cat > "${fake_bin}/codex" <<'CODEX'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -305,7 +351,7 @@ XML
 esac
 MVN
 
-  chmod +x "${fake_bin}/adapter_mutate_fixture.sh" "${fake_bin}/codex" "${fake_bin}/claude" "${fake_bin}/mvn"
+  chmod +x "${fake_bin}/adapter_mutate_fixture.sh" "${fake_bin}/bash" "${fake_bin}/codex" "${fake_bin}/claude" "${fake_bin}/mvn"
 
   export PATH="${fake_bin}:$PATH"
   export CODEX_HOME="${root}/codex-home"

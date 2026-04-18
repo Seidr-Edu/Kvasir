@@ -551,6 +551,23 @@ kvasir_service_write_reports_or_fail() {
   tp_write_reports
 }
 
+kvasir_service_apply_internal_report_failure() {
+  local status_detail="$1"
+  local message="$2"
+
+  TP_STATUS="failed"
+  TP_REASON="internal-report-inconsistency"
+  TP_STATUS_DETAIL="$status_detail"
+  TP_FAILURE_CLASS="internal-report-inconsistency"
+  TP_FAILURE_CLASS_LEGACY="unknown"
+  TP_FAILURE_PHASE="adapter"
+  TP_FAILURE_SUBCLASS="internal-report-inconsistency"
+  TP_FAILURE_FIRST_FAILURE_LINE="$message"
+  TP_FAILURE_LOG_EXCERPT_PATH="${TP_SUMMARY_DIR}/failure-log-excerpt.txt"
+  mkdir -p "$TP_SUMMARY_DIR"
+  printf '%s\n' "$message" > "$TP_FAILURE_LOG_EXCERPT_PATH"
+}
+
 kvasir_service_sync_result_from_report() {
   [[ -f "$TP_JSON_PATH" ]] || return 1
 
@@ -574,6 +591,18 @@ PY
   )" || return 1
 
   eval "$assignments"
+}
+
+kvasir_service_sync_result_or_fail() {
+  local status_detail="$1"
+  local message="$2"
+
+  if kvasir_service_sync_result_from_report; then
+    return 0
+  fi
+
+  kvasir_service_apply_internal_report_failure "$status_detail" "$message"
+  kvasir_service_write_reports_or_fail
 }
 
 kvasir_service_exit_code_for_result() {
@@ -667,6 +696,7 @@ kvasir_service_main() {
   KVASIR_SERVICE_RUNNER_TIMED_OUT="false"
   KVASIR_SERVICE_RUNNER_TIMEOUT_DETAIL=""
   KVASIR_SERVICE_RUNNER_EXIT_CODE=0
+  KVASIR_SERVICE_FORCE_FAILURE="false"
 
   tp_init_result_state
 
@@ -1003,15 +1033,28 @@ kvasir_service_main() {
       if ! kvasir_service_write_reports_or_fail; then
         return 1
       fi
+    else
+      KVASIR_SERVICE_FORCE_FAILURE="true"
+      if ! kvasir_service_sync_result_or_fail \
+        "runner_nonzero_without_report" \
+        "Runner exited with code ${KVASIR_SERVICE_RUNNER_EXIT_CODE} without a canonical report at ${TP_JSON_PATH}"; then
+        return 1
+      fi
     fi
   else
-    kvasir_service_sync_result_from_report || true
+    if ! kvasir_service_sync_result_or_fail \
+      "runner_success_without_report" \
+      "Runner exited successfully without a canonical report at ${TP_JSON_PATH}"; then
+      return 1
+    fi
   fi
 
   tp_log "summary: $TP_SUMMARY_MD_PATH"
   tp_log "json: $TP_JSON_PATH"
 
-  if kvasir_service_exit_code_for_result; then
+  if [[ "${KVASIR_SERVICE_FORCE_FAILURE:-false}" == "true" ]]; then
+    service_exit_code=1
+  elif kvasir_service_exit_code_for_result; then
     service_exit_code=0
   else
     service_exit_code=1

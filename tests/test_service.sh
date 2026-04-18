@@ -284,6 +284,66 @@ PY
   tpt_assert_pid_file_reaped "$pid_file" "service should reap timed out provider process"
 }
 
+case_runner_nonzero_after_report_exits_nonzero() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex" \
+    TPT_BASH_WRAPPER_MODE="kvasir-run-nonzero-after-report")"
+
+  tpt_assert_eq "1" "$rc" "unexpected non-timeout runner exits must fail the service"
+  tpt_assert_file_exists "$json_path" "non-timeout runner failure must preserve the canonical report when it exists"
+  tpt_assert_file_exists "${run_dir}/outputs/summary.md" "non-timeout runner failure must still emit summary"
+}
+
+case_missing_report_after_success_emits_internal_report_inconsistency() {
+  local tmp original_repo generated_repo run_dir log_path json_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir" \
+    KVASIR_ADAPTER="codex" \
+    TPT_BASH_WRAPPER_MODE="kvasir-run-drop-report-after-success")"
+
+  tpt_assert_eq "1" "$rc" "missing canonical report after a successful runner exit must fail the service"
+  tpt_assert_file_exists "$json_path" "service must rewrite a canonical report when sync fails"
+  python3 - <<'PY' "$json_path"
+import json
+import sys
+
+with open(sys.argv[1], "r", encoding="utf-8") as f:
+    obj = json.load(f)
+
+result = obj.get("result", {})
+if result.get("status") != "failed":
+    raise SystemExit(f"expected failed status, got {result!r}")
+if result.get("reason") != "internal-report-inconsistency":
+    raise SystemExit(f"expected internal-report-inconsistency reason, got {result!r}")
+if result.get("verdict") != "inconclusive":
+    raise SystemExit(f"expected inconclusive verdict, got {result!r}")
+if result.get("verdict_reason") not in {"internal-report-inconsistency", "internal_report_inconsistency"}:
+    raise SystemExit(f"expected internal-report-inconsistency verdict reason, got {result!r}")
+PY
+}
+
 case_env_override_rejected_in_strict_mode() {
   local tmp original_repo generated_repo run_dir log_path json_path manifest_path rc
   tmp="$(tpt_mktemp_dir)"
@@ -694,6 +754,8 @@ tpt_run_case "provider bootstrap failure still emits report" case_provider_boots
 tpt_run_case "failed login status reports adapter prereqs failed" case_failed_login_status_reports_adapter_prereqs_failed
 tpt_run_case "post completion hang recovers and preserves result" case_post_completion_hang_recovers_and_preserves_result
 tpt_run_case "pre completion hang emits timeout report" case_pre_completion_hang_emits_timeout_report
+tpt_run_case "runner nonzero after report exits nonzero" case_runner_nonzero_after_report_exits_nonzero
+tpt_run_case "missing report after success emits internal inconsistency" case_missing_report_after_success_emits_internal_report_inconsistency
 tpt_run_case "missing original repo still emits report" case_missing_original_repo_still_emits_report
 tpt_run_case "non-writable run dir still emits report" case_non_writable_run_dir_still_emits_report
 tpt_run_case "non-writable logs dir still emits report" case_non_writable_logs_dir_still_emits_report
