@@ -70,6 +70,7 @@ Input repos are immutable from the service point of view. Kvasir copies them int
 - `KVASIR_ORIGINAL_SUBDIR`
 - `KVASIR_GENERATED_SUBDIR`
 - `KVASIR_MAX_ITER`
+- `KVASIR_TEST_RUNNER_TIMEOUT_SEC` (default `7200`)
 - `KVASIR_WRITE_SCOPE_IGNORE_PREFIXES`
 
 The service entrypoint does not expose `--strict`; service verdicts belong in `test_port.json`.
@@ -89,6 +90,7 @@ Manifest v1 fields:
 - `generated_subdir`
 - `diagram_relpath`
 - `max_iter`
+- `runner_timeout_sec`
 - `write_scope_ignore_prefixes[]`
 
 The manifest is intentionally service-specific so the orchestrator can mount only the configuration Kvasir is meant to consume.
@@ -130,6 +132,11 @@ For container/service usage:
 - Exit `1`: contract/setup/prereq/reporting/internal failure prevented a normal evaluation result
 
 Domain verdicts live in `test_port.json`; orchestration should read the report instead of inferring meaning from process exit codes.
+
+Kvasir hardens provider CLI hangs in two layers:
+
+- If the provider emits its final useful output but never exits, the adapter records `post-completion-hang-recovered`, reaps the provider process group, and preserves the normal run result.
+- If the overall runner never returns before the configured timeout, service mode emits `result.reason=runner-timeout`, keeps writing reports, and exits `1`.
 
 ## Write-scope behavior
 

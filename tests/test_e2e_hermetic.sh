@@ -127,7 +127,7 @@ printf 'unsupported fake codex invocation\n' >&2
 exit 1
 CODEX
 
-  cat > "${fake_bin}/claude" <<'CLAUDE'
+cat > "${fake_bin}/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -135,6 +135,20 @@ if [[ "${1:-}" == "--version" ]]; then
   printf 'claude-fake 1.0.0\n'
   exit 0
 fi
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dangerously-skip-permissions)
+      shift
+      ;;
+    --print)
+      break
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ "${1:-}" == "--print" ]]; then
   call_no_file="${TPT_CLAUDE_CALL_COUNT_FILE:-}"

@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 scripts=(
+  test_adapters.sh
   test_cli.sh
   test_write_guard.sh
   test_runner.sh
