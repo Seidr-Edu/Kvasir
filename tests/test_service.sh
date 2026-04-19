@@ -548,6 +548,35 @@ YAML
   assert_report_fields "$json_path" "skipped" "invalid-service-manifest" "invalid_manifest" "skipped"
 }
 
+case_invalid_run_id_still_emits_report() {
+  local tmp original_repo generated_repo run_dir log_path json_path manifest_path rc
+  tmp="$(tpt_mktemp_dir)"
+  setup_fake_tools "$tmp"
+  prepare_fake_adapter_env "$tmp" "ignored-writes"
+  IFS=$'\t' read -r original_repo generated_repo < <(prepare_fixture_repos "$tmp")
+  run_dir="${tmp}/run"
+  log_path="${tmp}/service.log"
+  json_path="${run_dir}/outputs/test_port.json"
+  manifest_path="${run_dir}/config/manifest.yaml"
+  mkdir -p "${run_dir}/config"
+
+  cat > "$manifest_path" <<'YAML'
+version: 1
+run_id: ../bad/run-id
+adapter: codex
+YAML
+
+  rc="$(run_service_case "$tmp" "$log_path" \
+    KVASIR_ORIGINAL_REPO="$original_repo" \
+    KVASIR_GENERATED_REPO="$generated_repo" \
+    KVASIR_RUN_DIR="$run_dir")"
+
+  tpt_assert_eq "1" "$rc" "invalid run_id must exit 1"
+  tpt_assert_file_exists "$json_path" "invalid run_id must still emit json report"
+  tpt_assert_file_exists "${run_dir}/outputs/summary.md" "invalid run_id must still emit summary"
+  assert_report_fields "$json_path" "skipped" "invalid-run-id" "" "skipped"
+}
+
 case_missing_adapter_still_emits_report() {
   local tmp original_repo generated_repo run_dir log_path json_path rc
   tmp="$(tpt_mktemp_dir)"
@@ -748,6 +777,7 @@ tpt_run_case "env overrides manifest values" case_env_overrides_manifest_values
 tpt_run_case "build hints select subdir and surface hint metadata" case_build_hints_select_subdir_and_surface_hint_metadata
 tpt_run_case "invalid manifest still emits report" case_invalid_manifest_still_emits_report
 tpt_run_case "unknown manifest key still emits report" case_unknown_manifest_key_still_emits_report
+tpt_run_case "invalid run_id still emits report" case_invalid_run_id_still_emits_report
 tpt_run_case "missing adapter still emits report" case_missing_adapter_still_emits_report
 tpt_run_case "codex provider bootstrap uses runtime home" case_codex_provider_bootstrap_uses_runtime_home
 tpt_run_case "provider bootstrap failure still emits report" case_provider_bootstrap_failure_still_emits_report

@@ -80,6 +80,11 @@ kvasir_service_normalize_rel_path() {
   printf '%s\n' "$raw"
 }
 
+kvasir_service_validate_run_id() {
+  local value="$1"
+  [[ "$value" =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
 kvasir_service_load_manifest() {
   local manifest_path="$1"
   python3 - <<'PY' "$manifest_path"
@@ -607,7 +612,7 @@ kvasir_service_sync_result_or_fail() {
 
 kvasir_service_exit_code_for_result() {
   case "${TP_REASON:-}" in
-    invalid-service-manifest|invalid-service-config|missing-original-repo|missing-generated-repo|run-dir-not-writable|unsupported-adapter|adapter-prereqs-failed|missing-rsync|workspace-prepare-failed|internal-report-inconsistency|runner-timeout)
+    invalid-service-manifest|invalid-service-config|invalid-run-id|missing-original-repo|missing-generated-repo|run-dir-not-writable|unsupported-adapter|adapter-prereqs-failed|missing-rsync|workspace-prepare-failed|internal-report-inconsistency|runner-timeout)
       return 1
       ;;
     *)
@@ -767,6 +772,14 @@ kvasir_service_main() {
 
   if [[ -n "$manifest_run_id" ]]; then
     TP_RUN_ID="$manifest_run_id"
+  fi
+
+  if ! kvasir_service_validate_run_id "$TP_RUN_ID"; then
+    kvasir_service_apply_failure "invalid-run-id" "invalid_run_id"
+    if ! kvasir_service_write_reports_or_fail; then
+      return 1
+    fi
+    return 1
   fi
 
   if [[ -n "$manifest_adapter" ]]; then

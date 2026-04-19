@@ -131,13 +131,6 @@ cat > "${fake_bin}/claude" <<'CLAUDE'
 #!/usr/bin/env bash
 set -euo pipefail
 
-record_provider_pid() {
-  local pid_file="$1"
-  if [[ -n "$pid_file" ]]; then
-    printf '%s\n' "$$" > "$pid_file"
-  fi
-}
-
 if [[ "${1:-}" == "--version" ]]; then
   printf 'claude-fake 1.0.0\n'
   exit 0
