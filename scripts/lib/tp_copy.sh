@@ -80,7 +80,7 @@ tp_seed_ported_repo_with_original_tests() {
   IFS=':' read -r -a roots <<< "${TP_PORTED_DISCOVERED_TEST_ROOTS_CSV:-}"
   for root in "${roots[@]+"${roots[@]}"}"; do
     [[ -n "$root" ]] || continue
-    rm -rf "${TP_PORTED_REPO}/${root#./}" 2>/dev/null || true
+    rm -rf "${TP_PORTED_REPO:?}/${root#./}" 2>/dev/null || true
   done
 
   tp_discovery_copy_from_manifest "$TP_ORIGINAL_EFFECTIVE_PATH" "$TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH" "$TP_PORTED_REPO" >/dev/null || return 1
