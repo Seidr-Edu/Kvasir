@@ -86,7 +86,7 @@ def rel_path(root, path):
 def map_snapshot_rel_to_repo_rel(rel):
     if not generated_subdir:
         return rel
-    prefix = "./" + generated_subdir.strip("./")
+    prefix = "./" + generated_subdir.lstrip("./")
     if rel == prefix or rel.startswith(prefix + "/"):
         return rel
     return prefix + "/" + rel[2:]

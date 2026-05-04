@@ -36,9 +36,6 @@ PRUNED_DIR_NAMES = {
     "venv",
 }
 
-TEST_SOURCESET_TOKEN_RE = re.compile(
-    r"(test|spec|integration|functional|e2e|acceptance|verification)", re.I
-)
 TEST_IDENTIFIER_RE = re.compile(
     r"(^[iI][tT]$|^[iI][tT][A-Z0-9_].*|IT$|[Tt]est|[Ss]pec|[Ii]ntegration|[Ff]unctional|[Ee]2[Ee]|[Aa]cceptance|[Vv]erification)"
 )
@@ -72,7 +69,7 @@ def standard_test_root_for_parts(parts: list[str]) -> str | None:
     last_dir_idx = len(parts) - 2
     for idx in range(last_dir_idx + 1):
         part = parts[idx]
-        if part in {"test", "tests"}:
+        if idx == 0 and part in {"test", "tests"}:
             return "./" + "/".join(parts[: idx + 1])
         if part == "src" and idx + 1 <= last_dir_idx:
             source_set = parts[idx + 1]

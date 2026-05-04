@@ -79,9 +79,8 @@ class TestStandardTestRootForParts:
         assert standard_test_root_for_parts(["src", "main", "resources", "config.xml"]) is None
 
     def test_nested_test_segment_at_non_zero_index(self):
-        # docs/test/example.txt — test segment at idx=1 (after docs).
-        # This is the documented over-broad case: any test/ directory qualifies.
-        assert standard_test_root_for_parts(["docs", "test", "example.txt"]) == "./docs/test"
+        # docs/test/example.txt — "test" is not at idx=0, so it must not be treated as a root.
+        assert standard_test_root_for_parts(["docs", "test", "example.txt"]) is None
 
 
 # ── normalize_candidate_dir ──────────────────────────────────────────────────
