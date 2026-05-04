@@ -16,10 +16,10 @@ prepare_scope_env() {
   local root="$1"
   TP_LOG_DIR="${root}/logs"
   TP_SUMMARY_DIR="${root}/summary"
+  TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH="${TP_SUMMARY_DIR}/original-test-discovery.json"
   TP_TEST_SCOPE_JSON_PATH="${TP_SUMMARY_DIR}/test-scope.json"
   TP_TEST_SCOPE_PROBES_FILE="${TP_SUMMARY_DIR}/test-scope-probes.jsonl"
   TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-commands.tsv"
-  TP_TEST_SCOPE_EXCLUDED_TESTS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-tests.tsv"
   TP_MAVEN_LOCAL_REPO="${root}/workspace/.m2/repository"
   TP_GRADLE_USER_HOME="${root}/workspace/.gradle"
   TP_TMP_DIR="${root}/workspace/tmp"
@@ -611,6 +611,137 @@ case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees() {
   fi
 }
 
+case_snapshot_original_tests_discovers_multimodule_maven_custom_test_source() {
+  local tmp repo snapshot
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  snapshot="${tmp}/snapshot"
+
+  prepare_scope_env "$tmp"
+  TP_ORIGINAL_EFFECTIVE_PATH="$repo"
+  TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
+
+  mkdir -p \
+    "$repo/starter/src/contract/java/example" \
+    "$repo/starter/src/test/java/example"
+  cat > "${repo}/pom.xml" <<'POM'
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example</groupId>
+  <artifactId>parent</artifactId>
+  <version>1.0.0</version>
+  <packaging>pom</packaging>
+  <modules><module>starter</module></modules>
+</project>
+POM
+  cat > "${repo}/starter/pom.xml" <<'POM'
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>example</groupId>
+    <artifactId>parent</artifactId>
+    <version>1.0.0</version>
+  </parent>
+  <artifactId>starter</artifactId>
+  <build>
+    <testSourceDirectory>src/contract/java</testSourceDirectory>
+  </build>
+</project>
+POM
+  echo "class ContractPortTest {}" > "$repo/starter/src/contract/java/example/ContractPortTest.java"
+  echo "class UnitTest {}" > "$repo/starter/src/test/java/example/UnitTest.java"
+
+  tp_snapshot_original_tests
+
+  tpt_assert_file_exists "$snapshot/starter/src/contract/java/example/ContractPortTest.java" "snapshot should include Maven custom test source directories in modules"
+  tpt_assert_file_exists "$snapshot/starter/src/test/java/example/UnitTest.java" "snapshot should include standard module tests"
+}
+
+case_snapshot_original_tests_discovers_gradle_build_declared_custom_test_sources() {
+  local tmp repo snapshot
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  snapshot="${tmp}/snapshot"
+
+  prepare_scope_env "$tmp"
+  TP_ORIGINAL_EFFECTIVE_PATH="$repo"
+  TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
+
+  mkdir -p "$repo/src/contract/java/example" "$repo/src/test/java/example"
+  cat > "${repo}/build.gradle" <<'GRADLE'
+plugins {}
+sourceSets {
+  contractTest {
+    java.srcDirs = ['src/contract/java']
+  }
+}
+GRADLE
+  echo "class ContractPortSpec {}" > "$repo/src/contract/java/example/ContractPortSpec.java"
+  echo "class UnitTest {}" > "$repo/src/test/java/example/UnitTest.java"
+
+  tp_snapshot_original_tests
+
+  tpt_assert_file_exists "$snapshot/src/contract/java/example/ContractPortSpec.java" "snapshot should include Gradle build-declared custom test roots"
+  tpt_assert_file_exists "$snapshot/src/test/java/example/UnitTest.java" "snapshot should still include standard Gradle tests"
+}
+
+case_execution_summary_uses_discovery_count_not_execution_count() {
+  local tmp repo log
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  log="${tmp}/empty.log"
+
+  mkdir -p "$repo/module/src/test/java/example"
+  echo "class UnitTest {}" > "$repo/module/src/test/java/example/UnitTest.java"
+  : > "$log"
+
+  tp_collect_execution_summary "$repo" "$log" "TPT"
+
+  tpt_assert_eq "1" "${TPT_TESTS_DISCOVERED:-0}" "discovered test count should come from canonical file discovery"
+  tpt_assert_eq "0" "${TPT_TESTS_EXECUTED:-0}" "executed test count should remain zero without JUnit or log evidence"
+}
+
+case_seed_ported_repo_maps_module_prefixed_snapshot_into_generated_subdir() {
+  local tmp repo snapshot
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  snapshot="${tmp}/snapshot"
+
+  prepare_scope_env "$tmp"
+  TP_ORIGINAL_EFFECTIVE_PATH="$repo"
+  TP_ORIGINAL_TESTS_SNAPSHOT="$snapshot"
+  TP_PORTED_REPO="${tmp}/ported"
+  TP_PORTED_EFFECTIVE_REPO="${TP_PORTED_REPO}/starter"
+  TP_GENERATED_EFFECTIVE_SUBDIR="starter"
+
+  mkdir -p "$repo/starter/src/test/java/example" "$repo/starter/src/contract/java/example" "${TP_PORTED_REPO}/starter/src/test/java/example"
+  cat > "${repo}/starter/pom.xml" <<'POM'
+<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example</groupId>
+  <artifactId>starter</artifactId>
+  <version>1.0.0</version>
+  <build>
+    <testSourceDirectory>src/contract/java</testSourceDirectory>
+  </build>
+</project>
+POM
+  echo "class UnitTest {}" > "$repo/starter/src/test/java/example/UnitTest.java"
+  echo "class ContractTest {}" > "$repo/starter/src/contract/java/example/ContractTest.java"
+  echo "stale" > "${TP_PORTED_REPO}/starter/src/test/java/example/StaleTest.java"
+
+  tp_snapshot_original_tests
+  tp_refresh_ported_discovered_test_roots_state
+  tp_seed_ported_repo_with_original_tests
+
+  tpt_assert_file_exists "${TP_PORTED_REPO}/starter/src/test/java/example/UnitTest.java" "seed should copy module-prefixed standard tests into the generated subdir"
+  tpt_assert_file_exists "${TP_PORTED_REPO}/starter/src/contract/java/example/ContractTest.java" "seed should copy module-prefixed custom test roots into the generated subdir"
+  if [[ -e "${TP_PORTED_REPO}/starter/src/test/java/example/StaleTest.java" ]]; then
+    echo "ASSERT failed: stale discovered test roots should be cleared before reseeding" >&2
+    return 1
+  fi
+}
+
 tpt_run_case "maven uses workspace local repo" case_maven_uses_workspace_local_repo
 tpt_run_case "gradle wrapper invocation unchanged" case_gradle_wrapper_invocation_unchanged
 tpt_run_case "gradle invocation unchanged" case_gradle_invocation_unchanged
@@ -627,5 +758,9 @@ tpt_run_case "portable scope Gradle selects multiple passing tasks" case_portabl
 tpt_run_case "portable scope Gradle excludes environment task" case_portable_scope_gradle_excludes_environment_task_but_keeps_unit_task
 tpt_run_case "gradle task detection avoids false it suffixes" case_gradle_task_detection_does_not_treat_git_or_bit_as_it_tasks
 tpt_run_case "snapshot avoids false it suffixes and pruned trees" case_snapshot_original_tests_avoids_false_it_suffixes_and_pruned_trees
+tpt_run_case "snapshot discovers multimodule Maven custom test source" case_snapshot_original_tests_discovers_multimodule_maven_custom_test_source
+tpt_run_case "snapshot discovers Gradle build-declared custom test sources" case_snapshot_original_tests_discovers_gradle_build_declared_custom_test_sources
+tpt_run_case "execution summary uses discovery count not execution count" case_execution_summary_uses_discovery_count_not_execution_count
+tpt_run_case "seed maps module-prefixed snapshot into generated subdir" case_seed_ported_repo_maps_module_prefixed_snapshot_into_generated_subdir
 
 tpt_finish_suite

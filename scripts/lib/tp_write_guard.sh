@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tp_discovery.sh"
+
 tp_line_in_file() {
   local needle="$1"
   local file="$2"
@@ -94,7 +97,25 @@ tp_compute_rename_pairs() {
 
 tp_is_allowed_test_path() {
   local rel="$1"
+  local root
   local glob
+
+  if [[ -z "${TP_DISCOVERED_TEST_ROOTS_CSV:-}" && -f "${TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH:-}" ]]; then
+    eval "$(tp_discovery_load_shell_state "$TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH")"
+  fi
+  tp_refresh_ported_discovered_test_roots_state
+
+  local -a discovered_roots=()
+  IFS=':' read -r -a discovered_roots <<< "${TP_PORTED_DISCOVERED_TEST_ROOTS_CSV:-}"
+  for root in "${discovered_roots[@]+"${discovered_roots[@]}"}"; do
+    [[ -n "$root" ]] || continue
+    case "$rel" in
+      "$root"|"$root"/*)
+        return 0
+        ;;
+    esac
+  done
+
   for glob in "${TP_ALLOWED_MODEL_TEST_WRITES_GLOBS[@]+"${TP_ALLOWED_MODEL_TEST_WRITES_GLOBS[@]}"}"; do
     case "$rel" in
       "$glob")
@@ -141,6 +162,7 @@ tp_is_denied_write_scope_path() {
 
 tp_apply_workspace_write_policy() {
   local repo="$1"
+  local root
   local prefix
   local abs
 
@@ -156,6 +178,20 @@ tp_apply_workspace_write_policy() {
     else
       chmod ugo-w "$abs" 2>/dev/null || true
     fi
+  done
+
+  if [[ -z "${TP_DISCOVERED_TEST_ROOTS_CSV:-}" && -f "${TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH:-}" ]]; then
+    eval "$(tp_discovery_load_shell_state "$TP_ORIGINAL_TEST_DISCOVERY_JSON_PATH")"
+  fi
+  tp_refresh_ported_discovered_test_roots_state
+
+  local -a discovered_roots=()
+  IFS=':' read -r -a discovered_roots <<< "${TP_PORTED_DISCOVERED_TEST_ROOTS_CSV:-}"
+  for root in "${discovered_roots[@]+"${discovered_roots[@]}"}"; do
+    [[ -n "$root" ]] || continue
+    abs="${repo}/${root#./}"
+    [[ -e "$abs" ]] || continue
+    chmod -R u+w "$abs" 2>/dev/null || true
   done
 
   for abs in "$repo/src/test" "$repo/src/it" "$repo/src/integration" "$repo/src/functional" "$repo/src/e2e" "$repo/test" "$repo/tests"; do

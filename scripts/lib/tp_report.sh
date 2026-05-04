@@ -340,9 +340,6 @@ if not test_scope:
         "selected_commands": [],
         "selected_tasks": [],
         "excluded_commands": [],
-        "included_test_file_count": 0,
-        "excluded_test_file_count": 0,
-        "excluded_tests": [],
         "probes": [],
     }
 
@@ -570,8 +567,7 @@ summary_lines = [
     f"- Probe-selected test commands: {', '.join(obj['test_scope'].get('selected_commands', [])) if obj['test_scope'].get('selected_commands') else '<none>'}",
     f"- Original probe excluded commands: **{len(obj['test_scope'].get('excluded_commands', []))}**",
     f"- Original probe exclusion reasons: {summarize_reasons(obj['test_scope'].get('excluded_commands', []))}",
-    f"- Full-suite snapshot files included/excluded: **{obj['test_scope'].get('included_test_file_count', 0)}/{obj['test_scope'].get('excluded_test_file_count', 0)}**",
-    f"- Snapshot excluded test reasons: {summarize_reasons(obj['test_scope'].get('excluded_tests', []))}",
+    f"- Original test files discovered: **{obj['evidence']['retention']['original_snapshot_file_count']}**",
     f"- Adapter prereqs OK: **{str(obj['diagnostics'].get('adapter_prereqs_ok', False)).lower()}**",
     f"- Generated repo unchanged: **{str(obj['diagnostics'].get('generated_repo_unchanged', False)).lower()}**",
     f"- Write-scope violations: **{obj['diagnostics']['write_scope']['violation_count']}**",

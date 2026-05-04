@@ -3,15 +3,20 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tp_discovery.sh"
+
 tp_compute_evidence_json() {
   local repo_dir="$1"
   local snapshot_dir="$2"
   local manifest_path="$3"
   local out_json="$4"
+  local final_ported_test_file_count=0
 
   mkdir -p "$(dirname "$out_json")"
+  final_ported_test_file_count="$(tp_discovery_count_test_files "$repo_dir" 2>/dev/null || echo 0)"
 
-  python3 - <<'PY' "$repo_dir" "$snapshot_dir" "$manifest_path" "$out_json"
+  python3 - <<'PY' "$repo_dir" "$snapshot_dir" "$manifest_path" "$out_json" "$final_ported_test_file_count" "${TP_GENERATED_EFFECTIVE_SUBDIR:-}"
 import difflib
 import glob
 import json
@@ -20,7 +25,7 @@ import re
 import sys
 import xml.etree.ElementTree as ET
 
-repo_dir, snapshot_dir, manifest_path, out_json = sys.argv[1:]
+repo_dir, snapshot_dir, manifest_path, out_json, final_ported_test_file_count, generated_subdir = sys.argv[1:]
 
 ALLOWED_CATEGORIES = {
     "unportable",
@@ -78,6 +83,15 @@ def rel_path(root, path):
     return "./" + os.path.relpath(path, root).replace(os.sep, "/")
 
 
+def map_snapshot_rel_to_repo_rel(rel):
+    if not generated_subdir:
+        return rel
+    prefix = "./" + generated_subdir.strip("./")
+    if rel == prefix or rel.startswith(prefix + "/"):
+        return rel
+    return prefix + "/" + rel[2:]
+
+
 def list_files(root):
     out = []
     if not root or not os.path.isdir(root):
@@ -87,41 +101,6 @@ def list_files(root):
             out.append(rel_path(root, os.path.join(base, name)))
     out.sort()
     return out
-
-
-def is_allowed_test_rel(rel):
-    if rel.startswith("./src/test/") or rel.startswith("./test/") or rel.startswith("./tests/"):
-        return True
-    if rel.startswith("./src/"):
-        parts = rel.split("/", 4)
-        if len(parts) <= 2:
-            return False
-        source_set = parts[2]
-        return bool(
-            re.search(r"(test|spec|integration|functional|e2e|acceptance|verification)", source_set, re.I)
-            or source_set.lower() == "it"
-            or re.search(r"(^[iI][tT][A-Z0-9_].*|IT$)", source_set)
-        )
-    return False
-
-
-def count_allowed_test_files(repo):
-    if not repo or not os.path.isdir(repo):
-        return 0
-    excluded = {".git", "target", "build", ".gradle", ".scannerwork", "out"}
-    count = 0
-    for root, dirs, files in os.walk(repo):
-        rel_root = os.path.relpath(root, repo)
-        parts = [] if rel_root == "." else rel_root.split(os.sep)
-        dirs[:] = [d for d in dirs if d not in excluded]
-        if any(p in excluded for p in parts):
-            continue
-        for name in files:
-            rel = "./" + (name if rel_root == "." else os.path.join(rel_root, name))
-            rel = rel.replace(os.sep, "/")
-            if is_allowed_test_rel(rel):
-                count += 1
-    return count
 
 
 def parse_removal_manifest(path):
@@ -230,12 +209,12 @@ def count_assertion_line_changes(original_path, adapted_path):
 
 
 snapshot_files = list_files(snapshot_dir)
-snapshot_set = set(snapshot_files)
 
 retained = []
 removed = []
 for rel in snapshot_files:
-    candidate = os.path.join(repo_dir, rel[2:])
+    mapped_rel = map_snapshot_rel_to_repo_rel(rel)
+    candidate = os.path.join(repo_dir, mapped_rel[2:])
     if os.path.isfile(candidate):
         retained.append(rel)
     else:
@@ -246,7 +225,8 @@ retained_unchanged_count = 0
 assertion_line_change_count = 0
 for rel in retained:
     original_file = os.path.join(snapshot_dir, rel[2:])
-    adapted_file = os.path.join(repo_dir, rel[2:])
+    mapped_rel = map_snapshot_rel_to_repo_rel(rel)
+    adapted_file = os.path.join(repo_dir, mapped_rel[2:])
     try:
         with open(original_file, "rb") as f:
             original_bytes = f.read()
@@ -298,7 +278,7 @@ for rel in removed:
 
 junit = collect_junit_stats(repo_dir)
 
-original_count = len(snapshot_set)
+original_count = len(snapshot_files)
 retained_count = len(retained)
 removed_count = len(removed)
 retention_ratio = None
@@ -307,7 +287,7 @@ if original_count > 0:
 
 obj = {
     "original_snapshot_file_count": original_count,
-    "final_ported_test_file_count": count_allowed_test_files(repo_dir),
+    "final_ported_test_file_count": int(final_ported_test_file_count),
     "retained_original_test_file_count": retained_count,
     "removed_original_test_file_count": removed_count,
     "retention_ratio": retention_ratio,

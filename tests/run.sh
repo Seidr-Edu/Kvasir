@@ -4,7 +4,12 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+echo "== running test_discovery.py =="
+python3 -m pytest -q "${SCRIPT_DIR}/test_discovery.py"
+echo
+
 scripts=(
+  test_discovery.sh
   test_adapters.sh
   test_cli.sh
   test_write_guard.sh
