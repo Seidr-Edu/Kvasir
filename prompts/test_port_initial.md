@@ -1,4 +1,4 @@
-You are adapting the selected portable test scope from an original repository to run against a generated repository as a behavioral equivalence probe.
+You are porting the full test suite from an original repository to run against a generated repository as a behavioral equivalence probe.
 
 Hard constraints:
 - Your writable working directory is the generated evaluation repository only.
@@ -16,7 +16,7 @@ Hard constraints:
 - Allowed manifest categories: `unportable`, `missing-target-feature`, `generated-layout-mismatch`, `unsupported-runtime-assumption`.
 
 Task:
-- Inspect failing/incompatible tests from the selected portable scope and adapt them to compile and run in this generated repository.
+- Port all tests from the original repository to the best of your ability, adapting them to compile and run in this generated repository.
 - Prefer minimal compatibility changes (framework/import/api/test harness fixes) and keep assertions meaningful.
 - If you reach assertion/expected-value mismatches after compatibility fixes, stop preserving those failures as evidence instead of editing assertions to force green.
 - If something cannot be adapted, keep the test removal documented in the manifest and add a short compatibility note in test comments when possible.

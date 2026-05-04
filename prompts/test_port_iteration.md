@@ -1,4 +1,4 @@
-Continue adapting the selected portable test scope as a behavioral equivalence probe against the generated repository implementation.
+Continue porting the full test suite as a behavioral equivalence probe against the generated repository implementation.
 
 Hard constraints:
 - Your writable working directory is the generated evaluation repository only.
