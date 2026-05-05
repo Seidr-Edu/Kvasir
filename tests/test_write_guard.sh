@@ -129,6 +129,27 @@ case_allows_test_path_modifications() {
   [[ ! -s "$TP_WRITE_SCOPE_FAILURE_PATHS_FILE" ]]
 }
 
+case_allows_discovered_custom_test_root_modifications() {
+  local tmp repo before after
+  tmp="$(tpt_mktemp_dir)"
+  repo="${tmp}/repo"
+  before="${tmp}/before.tsv"
+  after="${tmp}/after.tsv"
+
+  create_base_repo "$repo"
+  setup_guard_env "$tmp"
+  TP_DISCOVERED_TEST_ROOTS_CSV="./starter/src/contract/java"
+
+  mkdir -p "${repo}/starter/src/contract/java"
+  echo "class ContractPortTest {}" > "${repo}/starter/src/contract/java/ContractPortTest.java"
+
+  tp_write_repo_manifest "$repo" "$before"
+  echo "// adapted" >> "${repo}/starter/src/contract/java/ContractPortTest.java"
+
+  tp_check_write_scope "$repo" "$before" "$after"
+  tpt_assert_eq "0" "$TP_WRITE_SCOPE_VIOLATION_COUNT" "discovered custom test roots must be writable"
+}
+
 case_rejects_non_test_modifications() {
   local tmp repo before after rc
   tmp="$(tpt_mktemp_dir)"
@@ -244,6 +265,7 @@ case_custom_ignore_does_not_mask_other_paths() {
 }
 
 tpt_run_case "allows test-path edits" case_allows_test_path_modifications
+tpt_run_case "allows discovered custom test-root edits" case_allows_discovered_custom_test_root_modifications
 tpt_run_case "rejects non-test edits" case_rejects_non_test_modifications
 tpt_run_case "ignores completion/proof/logs churn" case_ignores_completion_proof_logs
 tpt_run_case "ignores .mvn_repo churn" case_ignores_mvn_repo_changes

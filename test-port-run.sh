@@ -16,6 +16,7 @@ fi
 
 source "${TOOLS_DIR}/scripts/lib/tp_common.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_cli.sh"
+source "${TOOLS_DIR}/scripts/lib/tp_discovery.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_runner.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_build_env.sh"
 source "${TOOLS_DIR}/scripts/lib/tp_write_guard.sh"
@@ -67,10 +68,12 @@ tp_init_result_state() {
   TP_TEST_SCOPE_SELECTED_COMMANDS_CSV=""
   TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
   TP_TEST_SCOPE_SELECTED_MAVEN_MODE=""
-  TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT=0
-  TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT=0
   TP_TEST_SCOPE_FAILURE_CLASS=""
   TP_TEST_SCOPE_FAILURE_LOG=""
+  TP_DISCOVERED_TEST_ROOTS_CSV=""
+  TP_PORTED_DISCOVERED_TEST_ROOTS_CSV=""
+  TP_DISCOVERED_TEST_FILE_COUNT=0
+  TP_ORIGINAL_DISCOVERED_TEST_FILE_COUNT=0
 
   TP_BASELINE_ORIGINAL_STATUS="skipped"
   TP_BASELINE_ORIGINAL_RC=-1
@@ -267,6 +270,8 @@ tp_configure_generated_effective_roots() {
     TP_PORTED_EFFECTIVE_REPO="${TP_PORTED_REPO}"
     TP_PORTED_REPO_ARTIFACT_EFFECTIVE="${TP_PORTED_REPO_ARTIFACT}"
   fi
+
+  tp_refresh_ported_discovered_test_roots_state
 }
 
 tp_capture_failure_diagnostics() {
@@ -464,7 +469,7 @@ tp_execute() {
         break
       fi
 
-      tp_refresh_evidence_state "$TP_PORTED_EFFECTIVE_REPO" "$TP_ORIGINAL_TESTS_SNAPSHOT" "$TP_REMOVED_TESTS_MANIFEST_PATH" "$TP_EVIDENCE_JSON_PATH"
+      tp_refresh_evidence_state "$TP_PORTED_REPO" "$TP_ORIGINAL_TESTS_SNAPSHOT" "$TP_REMOVED_TESTS_MANIFEST_PATH" "$TP_EVIDENCE_JSON_PATH"
 
       if [[ "${TP_EVIDENCE_UNDOCUMENTED_REMOVED_TEST_COUNT:-0}" -gt 0 ]]; then
         TP_STATUS="failed"
@@ -573,7 +578,7 @@ main() {
   fi
 
   if [[ -d "${TP_PORTED_EFFECTIVE_REPO:-}" && -d "${TP_ORIGINAL_TESTS_SNAPSHOT:-}" ]]; then
-    tp_refresh_evidence_state "$TP_PORTED_EFFECTIVE_REPO" "$TP_ORIGINAL_TESTS_SNAPSHOT" "$TP_REMOVED_TESTS_MANIFEST_PATH" "$TP_EVIDENCE_JSON_PATH" || true
+    tp_refresh_evidence_state "$TP_PORTED_REPO" "$TP_ORIGINAL_TESTS_SNAPSHOT" "$TP_REMOVED_TESTS_MANIFEST_PATH" "$TP_EVIDENCE_JSON_PATH" || true
   fi
 
   tp_compute_behavioral_verdict

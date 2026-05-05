@@ -3,6 +3,9 @@
 
 set -euo pipefail
 
+# shellcheck source=/dev/null
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tp_discovery.sh"
+
 tp_restore_errexit() {
   local had_errexit="${1:-false}"
   if [[ "$had_errexit" == "true" ]]; then
@@ -73,15 +76,12 @@ tp_test_scope_reset() {
   TP_TEST_SCOPE_SELECTED_COMMANDS_CSV=""
   TP_TEST_SCOPE_SELECTED_TASKS_CSV=""
   TP_TEST_SCOPE_SELECTED_MAVEN_MODE=""
-  TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT=0
-  TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT=0
   TP_TEST_SCOPE_FAILURE_CLASS=""
   TP_TEST_SCOPE_FAILURE_LOG=""
 
   mkdir -p "$(dirname "$TP_TEST_SCOPE_JSON_PATH")"
   : > "$TP_TEST_SCOPE_PROBES_FILE"
   : > "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE"
-  : > "$TP_TEST_SCOPE_EXCLUDED_TESTS_FILE"
 }
 
 tp_test_scope_record_probe() {
@@ -123,10 +123,10 @@ tp_test_scope_record_excluded_command() {
 
 tp_test_scope_write_json() {
   python3 - <<'PY' \
-    "$TP_TEST_SCOPE_JSON_PATH" "$TP_TEST_SCOPE_PROBES_FILE" "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" "$TP_TEST_SCOPE_EXCLUDED_TESTS_FILE" \
+    "$TP_TEST_SCOPE_JSON_PATH" "$TP_TEST_SCOPE_PROBES_FILE" "$TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE" \
     "${TP_TEST_SCOPE_MODE:-portable-tests}" "${TP_TEST_SCOPE_STATUS:-unselected}" "${TP_TEST_SCOPE_RUNNER:-unknown}" "${TP_TEST_SCOPE_BUILD_TOOL:-unknown}" \
     "${TP_TEST_SCOPE_SELECTION_REASON:-}" "${TP_TEST_SCOPE_SELECTED_COMMANDS_CSV:-}" "${TP_TEST_SCOPE_SELECTED_TASKS_CSV:-}" \
-    "${TP_TEST_SCOPE_INCLUDED_TEST_FILE_COUNT:-0}" "${TP_TEST_SCOPE_EXCLUDED_TEST_FILE_COUNT:-0}" "${TP_TEST_SCOPE_FAILURE_CLASS:-}"
+    "${TP_TEST_SCOPE_FAILURE_CLASS:-}"
 import json
 import os
 import sys
@@ -135,7 +135,6 @@ import sys
     out_path,
     probes_path,
     excluded_commands_path,
-    excluded_tests_path,
     mode,
     status,
     runner,
@@ -143,8 +142,6 @@ import sys
     selection_reason,
     selected_commands_csv,
     selected_tasks_csv,
-    included_count,
-    excluded_count,
     failure_class,
 ) = sys.argv[1:]
 
@@ -187,23 +184,6 @@ def read_excluded_commands(path):
     return rows
 
 
-def read_excluded_tests(path):
-    rows = []
-    if not path or not os.path.exists(path):
-        return rows
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if not line:
-                continue
-            parts = line.split("\t", 1)
-            rows.append({
-                "path": parts[0],
-                "reason": parts[1] if len(parts) > 1 else "out-of-scope",
-            })
-    return rows
-
-
 def split_csv(value):
     return [part for part in value.split(":") if part]
 
@@ -217,9 +197,6 @@ obj = {
     "selected_commands": split_csv(selected_commands_csv),
     "selected_tasks": split_csv(selected_tasks_csv),
     "excluded_commands": read_excluded_commands(excluded_commands_path),
-    "included_test_file_count": int(included_count or 0),
-    "excluded_test_file_count": int(excluded_count or 0),
-    "excluded_tests": read_excluded_tests(excluded_tests_path),
     "probes": read_jsonl(probes_path),
     "failure_class": failure_class or None,
 }
@@ -232,22 +209,10 @@ PY
 
 tp_detect_test_source_dirs() {
   local repo="$1"
-  local -a dirs=()
-
-  # Standard locations
-  for d in "$repo/src/test" "$repo/test" "$repo/tests"; do
-    [[ -d "$d" ]] && dirs+=("$d")
-  done
-  # Non-standard Gradle source sets under src/ (e.g. src/jarFileTest, src/intTest)
-  if [[ -d "$repo/src" ]]; then
-    while IFS= read -r d; do
-      [[ "$d" == "$repo/src/main" ]] && continue
-      [[ "$d" == "$repo/src/test" ]] && continue
-      dirs+=("$d")
-    done < <(find "$repo/src" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
-  fi
-
-  printf '%s\n' "${dirs[@]+${dirs[@]}}"
+  while IFS= read -r rel; do
+    [[ -n "$rel" ]] || continue
+    printf '%s\n' "${repo}/${rel#./}"
+  done < <(tp_discovery_print_roots "$repo")
 }
 
 tp_detect_gradle_test_task() {
@@ -532,8 +497,11 @@ tp_collect_execution_summary() {
   local repo="$1"
   local log_file="$2"
   local prefix="$3"
+  local discovered=0
 
-  eval "$(python3 - <<'PY' "$repo" "$log_file" "$prefix"
+  discovered="$(tp_discovery_count_test_files "$repo" 2>/dev/null || echo 0)"
+
+  eval "$(python3 - <<'PY' "$repo" "$log_file" "$prefix" "$discovered"
 import glob
 import os
 import re
@@ -541,7 +509,7 @@ import shlex
 import sys
 import xml.etree.ElementTree as ET
 
-repo, log_file, prefix = sys.argv[1:]
+repo, log_file, prefix, discovered = sys.argv[1:]
 
 patterns = [
     "target/surefire-reports/*.xml",
@@ -643,10 +611,8 @@ if executed == 0 and os.path.isfile(log_file):
                 failed += int(g.group(2) or "0")
                 skipped += int(g.group(3) or "0")
 
-discovered = executed
-
 assignments = {
-    f"{prefix}_TESTS_DISCOVERED": discovered,
+    f"{prefix}_TESTS_DISCOVERED": int(discovered),
     f"{prefix}_TESTS_EXECUTED": executed,
     f"{prefix}_TESTS_FAILED": failed,
     f"{prefix}_TESTS_ERRORS": errors,

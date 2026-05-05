@@ -216,7 +216,6 @@ case_portable_scope_retries_toolchain_selection_failure() {
   TP_TEST_SCOPE_JSON_PATH="${TP_SUMMARY_DIR}/test-scope.json"
   TP_TEST_SCOPE_PROBES_FILE="${TP_SUMMARY_DIR}/test-scope-probes.jsonl"
   TP_TEST_SCOPE_EXCLUDED_COMMANDS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-commands.tsv"
-  TP_TEST_SCOPE_EXCLUDED_TESTS_FILE="${TP_SUMMARY_DIR}/test-scope-excluded-tests.tsv"
   mkdir -p "$TP_LOG_DIR" "$TP_SUMMARY_DIR"
   export TPT_BUILD_ENV_JDK_LOG="$jdk_log"
   make_fake_maven "$tmp" "portable-retry-on-toolchain"

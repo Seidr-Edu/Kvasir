@@ -471,11 +471,6 @@ if not scope.get("excluded_commands"):
     raise SystemExit(f"expected environment-excluded scope command, got {scope}")
 if scope["excluded_commands"][0].get("failure_class") != "environment-assumption-failure":
     raise SystemExit(f"expected environment-assumption-failure exclusion, got {scope}")
-if scope.get("excluded_test_file_count") != 0:
-    raise SystemExit(f"expected full-suite snapshot to exclude zero tests, got {scope}")
-excluded_tests = scope.get("excluded_tests", [])
-if any(item.get("path") == "./src/test/java/DatabaseIT.java" for item in excluded_tests):
-    raise SystemExit(f"expected DatabaseIT.java to stay in the full-suite snapshot, got {scope}")
 if baseline.get("failure", {}).get("type") not in ("", None):
     raise SystemExit(f"expected baseline environmental-noise failure type, got {baseline}")
 PY

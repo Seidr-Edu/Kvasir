@@ -153,9 +153,6 @@ JSON
   "selected_commands": ["mvn test"],
   "selected_tasks": [],
   "excluded_commands": [],
-  "included_test_file_count": 2,
-  "excluded_test_file_count": 0,
-  "excluded_tests": [],
   "probes": []
 }
 JSON
@@ -198,8 +195,6 @@ if "policy" in obj["diagnostics"]["write_scope"]:
 scope = obj.get("test_scope", {})
 if scope.get("mode") != "portable-tests" or scope.get("selected_commands") != ["mvn test"]:
     raise SystemExit(f"unexpected test scope: {scope}")
-if scope.get("included_test_file_count") != 2 or scope.get("excluded_test_file_count") != 0:
-    raise SystemExit(f"unexpected scope counts: {scope}")
 shape = obj.get("evidence", {}).get("retention", {})
 if shape.get("retained_original_test_file_count") != 1:
     raise SystemExit(f"unexpected retained count: {shape}")
@@ -237,7 +232,7 @@ PY
 
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Schema: kvasir.test_port.v3" "summary should mention v3 schema"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Original probe scope" "summary should mention probe diagnostics"
-  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Full-suite snapshot files included/excluded" "summary should include full-suite snapshot counts"
+  tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Original test files discovered" "summary should include discovered original test files"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Documented removed tests" "summary should include documented removal count"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Removed original tests by category" "summary should include removal categories"
   tpt_assert_file_contains "$TP_SUMMARY_MD_PATH" "Evidence interpretation" "summary should characterize evidence quality"
